@@ -1,0 +1,40 @@
+# Binaries
+/bin/
+/sorta
+*.exe
+.cursor/
+
+# Go
+/vendor/
+
+# Frontend
+web/node_modules/
+web/dist/
+cmd/sorta/webdist/*
+!cmd/sorta/webdist/.gitkeep
+
+# Test / local
+/testdata/
+*.log
+.DS_Store
+**/.sorta/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+
+
+# Production (single binary):
+# ./bin/sorta ~/Pictures/my-trip
+
+# Development (two terminals):
+# go run ./cmd/sorta -no-open ~/Pictures/my-trip
+# cd web && npm run dev
+
+# Rebuild after UI changes:
+# ./scripts/build.sh
+
+# GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o bin/sorta-darwin-amd64 ./cmd/sorta
+

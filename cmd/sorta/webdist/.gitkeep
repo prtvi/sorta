@@ -1,0 +1,2 @@
+# Placeholder so Go embed succeeds before the React production build is copied here.
+# Run: npm run build --prefix web && cp -R web/dist/* cmd/sorta/webdist/
