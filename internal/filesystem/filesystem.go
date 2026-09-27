@@ -11,7 +11,7 @@ import (
 )
 
 // ClassificationDirs are created under the working directory at startup.
-var ClassificationDirs = []string{"liked", "disliked", "review"}
+var ClassificationDirs = []string{"liked", "disliked", "review", "deleted"}
 
 // Store performs safe filesystem operations constrained to a root directory.
 type Store struct {
@@ -34,7 +34,7 @@ func NewStore(root string) (*Store, error) {
 	return &Store{Root: abs}, nil
 }
 
-// EnsureClassificationDirs creates liked/, disliked/, and review/ if missing.
+// EnsureClassificationDirs creates liked/, disliked/, review/, and deleted/ if missing.
 func (s *Store) EnsureClassificationDirs() error {
 	for _, name := range ClassificationDirs {
 		dir := filepath.Join(s.Root, name)
@@ -148,6 +148,7 @@ func (s *Store) FindInLibrary(name string) (string, error) {
 		models.BucketLiked,
 		models.BucketReview,
 		models.BucketDisliked,
+		models.BucketDeleted,
 	} {
 		path, err := s.ResolveInBucket(b, name)
 		if err != nil {
@@ -173,6 +174,7 @@ func (s *Store) BucketDir(bucket models.Bucket) (string, error) {
 
 // MoveBetweenBuckets moves a photo from one bucket to another using rename.
 // Conflicts get a unique " (n)" suffix (existing V1 strategy — never overwrite).
+// Matching Sony .ARW sidecars (same basename stem) move with the photo.
 func (s *Store) MoveBetweenBuckets(filename string, from, to models.Bucket) (*models.ActionRecord, error) {
 	if !from.Valid() || !to.Valid() {
 		return nil, fmt.Errorf("invalid bucket")
@@ -206,8 +208,27 @@ func (s *Store) MoveBetweenBuckets(filename string, from, to models.Bucket) (*mo
 		return nil, err
 	}
 
+	arwSrc := findARWCompanion(src)
+
 	if err := os.Rename(src, dest); err != nil {
 		return nil, err
+	}
+
+	var companions []models.CompanionMove
+	if arwSrc != "" {
+		companionDest, cerr := companionDestination(destDir, dest, arwSrc)
+		if cerr != nil {
+			_ = os.Rename(dest, src)
+			return nil, cerr
+		}
+		if err := os.Rename(arwSrc, companionDest); err != nil {
+			_ = os.Rename(dest, src)
+			return nil, err
+		}
+		companions = append(companions, models.CompanionMove{
+			OriginalPath: arwSrc,
+			Destination:  companionDest,
+		})
 	}
 
 	action := models.PhotoAction(to)
@@ -222,10 +243,49 @@ func (s *Store) MoveBetweenBuckets(filename string, from, to models.Bucket) (*mo
 		Action:       action,
 		FromBucket:   from,
 		ToBucket:     to,
+		Companions:   companions,
 	}, nil
 }
 
-// ListLibraryBucket returns photos in a bucket (root|liked|review|disliked).
+// findARWCompanion returns the path of a same-stem .ARW sidecar next to src, or "".
+func findARWCompanion(src string) string {
+	if strings.EqualFold(filepath.Ext(src), ".arw") {
+		return ""
+	}
+	dir := filepath.Dir(src)
+	stem := strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.EqualFold(filepath.Ext(name), ".arw") {
+			continue
+		}
+		compStem := strings.TrimSuffix(name, filepath.Ext(name))
+		if strings.EqualFold(compStem, stem) {
+			return filepath.Join(dir, name)
+		}
+	}
+	return ""
+}
+
+// companionDestination places the sidecar beside the moved photo, matching the
+// photo's final stem (including any " (n)" conflict suffix) and preserving the
+// sidecar's original extension casing.
+func companionDestination(destDir, photoDest, companionSrc string) (string, error) {
+	photoBase := filepath.Base(photoDest)
+	photoStem := strings.TrimSuffix(photoBase, filepath.Ext(photoBase))
+	ext := filepath.Ext(companionSrc)
+	dest := filepath.Join(destDir, photoStem+ext)
+	return uniqueDestination(dest)
+}
+
+// ListLibraryBucket returns photos in a bucket (root|liked|review|disliked|deleted).
 func (s *Store) ListLibraryBucket(bucket models.Bucket) ([]models.Photo, error) {
 	if !bucket.LibraryBucket() {
 		return nil, fmt.Errorf("invalid library bucket")
@@ -246,9 +306,16 @@ func (s *Store) ListLibraryBucket(bucket models.Bucket) ([]models.Photo, error) 
 
 // UndoMove restores a previously moved file to its original path.
 // If the original name is taken, a unique name is chosen.
+// Companion sidecars recorded on the action are restored first.
 func (s *Store) UndoMove(rec models.ActionRecord) (string, error) {
 	if _, err := os.Stat(rec.Destination); err != nil {
 		return "", err
+	}
+
+	for _, c := range rec.Companions {
+		if err := undoCompanion(s.Root, c); err != nil {
+			return "", err
+		}
 	}
 
 	dest := rec.OriginalPath
@@ -271,6 +338,28 @@ func (s *Store) UndoMove(rec models.ActionRecord) (string, error) {
 	return filepath.Base(dest), nil
 }
 
+func undoCompanion(root string, c models.CompanionMove) error {
+	if _, err := os.Stat(c.Destination); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	dest := c.OriginalPath
+	rel, err := filepath.Rel(root, dest)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("undo companion path escapes root")
+	}
+	dest, err = uniqueDestination(dest)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(c.Destination, dest)
+}
+
 // CollectStats returns counts from the filesystem.
 func (s *Store) CollectStats() (models.Stats, error) {
 	remaining, err := scanner.CountInDir(s.Root)
@@ -289,6 +378,10 @@ func (s *Store) CollectStats() (models.Stats, error) {
 	if err != nil {
 		return models.Stats{}, err
 	}
+	deleted, err := scanner.CountInDir(filepath.Join(s.Root, "deleted"))
+	if err != nil {
+		return models.Stats{}, err
+	}
 	return models.Stats{
 		Total:     remaining + liked + disliked + review,
 		Remaining: remaining,
@@ -296,5 +389,6 @@ func (s *Store) CollectStats() (models.Stats, error) {
 		Liked:     liked,
 		Disliked:  disliked,
 		Review:    review,
+		Deleted:   deleted,
 	}, nil
 }

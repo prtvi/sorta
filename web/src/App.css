@@ -338,6 +338,12 @@ kbd {
   color: #1a0606;
 }
 
+.btn--delete {
+  background: #3a2222;
+  color: #f0c8c8;
+  border: 1px solid #6a3838;
+}
+
 .btn--review {
   background: var(--review);
   color: #1a1404;

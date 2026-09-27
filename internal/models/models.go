@@ -8,12 +8,13 @@ const (
 	BucketLiked    Bucket = "liked"
 	BucketReview   Bucket = "review"
 	BucketDisliked Bucket = "disliked"
+	BucketDeleted  Bucket = "deleted"
 )
 
 // Valid reports whether b is a known bucket.
 func (b Bucket) Valid() bool {
 	switch b {
-	case BucketRoot, BucketLiked, BucketReview, BucketDisliked:
+	case BucketRoot, BucketLiked, BucketReview, BucketDisliked, BucketDeleted:
 		return true
 	default:
 		return false
@@ -80,6 +81,12 @@ type BurstKeepResponse struct {
 	Stats   Stats    `json:"stats"`
 }
 
+// CompanionMove records a sidecar file moved with a photo (e.g. Sony .ARW).
+type CompanionMove struct {
+	OriginalPath string
+	Destination  string
+}
+
 // ActionRecord stores enough information to undo a move.
 type ActionRecord struct {
 	Filename     string
@@ -88,6 +95,7 @@ type ActionRecord struct {
 	Action       PhotoAction
 	FromBucket   Bucket
 	ToBucket     Bucket
+	Companions   []CompanionMove
 }
 
 // UndoEntry is one undo step; may contain multiple records for a bulk move.
@@ -125,6 +133,7 @@ type Stats struct {
 	Liked     int `json:"liked"`
 	Disliked  int `json:"disliked"`
 	Review    int `json:"review"`
+	Deleted   int `json:"deleted"`
 }
 
 // SessionStats tracks actions in the current process only.

@@ -11,10 +11,11 @@ import (
 
 // Classification directories that must not be scanned for photos in the root.
 var skipDirs = map[string]bool{
-	"liked":         true,
-	"disliked":      true,
-	"review":        true,
-	".sorta": true,
+	"liked":    true,
+	"disliked": true,
+	"review":   true,
+	"deleted":  true,
+	".sorta":   true,
 }
 
 // supportedExts are case-insensitive image extensions for V1.

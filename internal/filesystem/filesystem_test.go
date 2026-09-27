@@ -18,11 +18,42 @@ func TestNewStoreAndEnsureDirs(t *testing.T) {
 	if err := store.EnsureClassificationDirs(); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"liked", "disliked", "review"} {
+	for _, name := range []string{"liked", "disliked", "review", "deleted"} {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || !info.IsDir() {
 			t.Fatalf("missing dir %s: %v", name, err)
 		}
+	}
+}
+
+func TestMoveToDeletedTakesARW(t *testing.T) {
+	dir := t.TempDir()
+	store, err := filesystem.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.EnsureClassificationDirs()
+	if err := os.WriteFile(filepath.Join(dir, "liked", "gone.jpg"), []byte("j"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "liked", "gone.ARW"), []byte("r"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.MoveBetweenBuckets("gone.jpg", models.BucketLiked, models.BucketDeleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deleted", "gone.jpg")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deleted", "gone.ARW")); err != nil {
+		t.Fatalf("ARW should move to deleted: %v", err)
+	}
+	if _, err := store.UndoMove(*rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "liked", "gone.ARW")); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -212,6 +243,132 @@ func TestMultipleUndoOrder(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, actions[i].name)); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestMoveTakesARWCompanion(t *testing.T) {
+	dir := t.TempDir()
+	store, err := filesystem.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.EnsureClassificationDirs()
+
+	jpg := "DSC0001.JPG"
+	arw := "DSC0001.ARW"
+	if err := os.WriteFile(filepath.Join(dir, jpg), []byte("jpeg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, arw), []byte("raw"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, err := store.MoveToClassification(jpg, models.ActionLiked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Companions) != 1 {
+		t.Fatalf("expected 1 companion, got %d", len(rec.Companions))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "liked", jpg)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "liked", arw)); err != nil {
+		t.Fatalf("ARW should have moved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, arw)); !os.IsNotExist(err) {
+		t.Fatal("ARW should be gone from root")
+	}
+
+	if _, err := store.UndoMove(*rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, jpg)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, arw)); err != nil {
+		t.Fatalf("ARW should be restored: %v", err)
+	}
+}
+
+func TestMoveARWCompanionUsesConflictStem(t *testing.T) {
+	dir := t.TempDir()
+	store, err := filesystem.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.EnsureClassificationDirs()
+
+	if err := os.WriteFile(filepath.Join(dir, "liked", "a.jpg"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.jpg"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.ARW"), []byte("raw"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, err := store.MoveToClassification("a.jpg", models.ActionLiked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Filename != "a (1).jpg" {
+		t.Fatalf("expected unique jpg name, got %q", rec.Filename)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "liked", "a (1).ARW")); err != nil {
+		t.Fatalf("ARW should share conflict stem: %v", err)
+	}
+}
+
+func TestMoveBetweenBucketsTakesARW(t *testing.T) {
+	dir := t.TempDir()
+	store, err := filesystem.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.EnsureClassificationDirs()
+	if err := os.WriteFile(filepath.Join(dir, "liked", "shot.jpg"), []byte("j"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "liked", "shot.arw"), []byte("r"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, err := store.MoveBetweenBuckets("shot.jpg", models.BucketLiked, models.BucketReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "review", "shot.jpg")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "review", "shot.arw")); err != nil {
+		t.Fatalf("lowercase .arw should move: %v", err)
+	}
+	if _, err := store.UndoMove(*rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "liked", "shot.arw")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMoveWithoutARWStillWorks(t *testing.T) {
+	dir := t.TempDir()
+	store, err := filesystem.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.EnsureClassificationDirs()
+	if err := os.WriteFile(filepath.Join(dir, "solo.jpg"), []byte("j"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.MoveToClassification("solo.jpg", models.ActionDisliked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Companions) != 0 {
+		t.Fatalf("unexpected companions: %+v", rec.Companions)
 	}
 }
 

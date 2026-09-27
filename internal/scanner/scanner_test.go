@@ -17,7 +17,7 @@ func TestScanRootFindsSupportedFormats(t *testing.T) {
 		}
 	}
 	// Classification dirs and nested files must be ignored.
-	for _, sub := range []string{"liked", "disliked", "review"} {
+	for _, sub := range []string{"liked", "disliked", "review", "deleted"} {
 		if err := os.Mkdir(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}

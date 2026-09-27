@@ -1,5 +1,5 @@
 export type PhotoAction = 'liked' | 'disliked' | 'review'
-export type Bucket = 'root' | 'liked' | 'review' | 'disliked'
+export type Bucket = 'root' | 'liked' | 'review' | 'disliked' | 'deleted'
 export type AppMode = 'cull' | 'library' | 'review' | 'compare'
 export type ImageSize = 'view' | 'thumb'
 
@@ -29,6 +29,7 @@ export interface Stats {
   liked: number
   disliked: number
   review: number
+  deleted: number
 }
 
 export interface SessionStats {

@@ -34,7 +34,7 @@ type Props = {
   onToggleFullscreen: () => void
 }
 
-const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'review', 'disliked']
+const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'review', 'disliked', 'deleted']
 const EXPORT_BATCH_SIZE = 30
 const EXPORT_MAX_BYTES = 15 * 1024 * 1024
 
@@ -80,7 +80,7 @@ export default function LibraryView({
   const [photos, setPhotos] = useState<Photo[]>([])
   const [bursts, setBursts] = useState<BurstGroup[]>([])
   const [singles, setSingles] = useState<Photo[]>([])
-  const [counts, setCounts] = useState({ root: 0, liked: 0, review: 0, disliked: 0 })
+  const [counts, setCounts] = useState({ root: 0, liked: 0, review: 0, disliked: 0, deleted: 0 })
   const [focused, setFocused] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewer, setViewer] = useState<Photo | null>(null)
@@ -106,6 +106,7 @@ export default function LibraryView({
         liked: fs.liked,
         review: fs.review,
         disliked: fs.disliked,
+        deleted: fs.deleted,
       })
     },
     [],
@@ -237,6 +238,7 @@ export default function LibraryView({
           if (viewer?.name === names[0]) setViewer(null)
           invalidateCache(bucket, to)
           onStats(res.stats, (await fetchStats()).session)
+          if (to === 'deleted') onToast('Moved to Deleted')
         } else {
           const res = await movePhotosBulk(
             names.map((filename) => ({ filename, from: bucket })),
@@ -255,9 +257,13 @@ export default function LibraryView({
           invalidateCache(bucket, to)
           onStats(res.stats, (await fetchStats()).session)
           if (res.failedCount > 0) {
-            onToast(`Moved ${res.movedCount}. ${res.failedCount} could not be moved.`)
+            onToast(
+              to === 'deleted'
+                ? `Deleted ${res.movedCount}. ${res.failedCount} failed.`
+                : `Moved ${res.movedCount}. ${res.failedCount} could not be moved.`,
+            )
           } else {
-            onToast(`Moved ${res.movedCount} photos`)
+            onToast(to === 'deleted' ? `Deleted ${res.movedCount} photos` : `Moved ${res.movedCount} photos`)
           }
         }
         await refreshCounts()
@@ -276,7 +282,7 @@ export default function LibraryView({
     (to: Bucket) => {
       const names = targets()
       if (names.length === 0) return
-      if (names.length > 1) {
+      if (names.length > 1 || to === 'deleted') {
         setConfirm({ to, names })
         return
       }
@@ -284,6 +290,11 @@ export default function LibraryView({
     },
     [targets, doMove],
   )
+
+  const requestDelete = useCallback(() => {
+    if (bucket === 'deleted') return
+    requestMove('deleted')
+  }, [bucket, requestMove])
 
   const runUndo = useCallback(async () => {
     try {
@@ -513,9 +524,12 @@ export default function LibraryView({
         } else if (e.key === 'r' || e.key === 'R') {
           e.preventDefault()
           requestMove('review')
-        } else if (e.key === 'u' || e.key === 'U') {
+        } else         if (e.key === 'u' || e.key === 'U') {
           e.preventDefault()
           requestMove('root')
+        } else if (e.key === 'Delete' && bucket !== 'deleted') {
+          e.preventDefault()
+          requestDelete()
         } else if (e.key === 'Backspace' || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z')) {
           e.preventDefault()
           void runUndo()
@@ -573,12 +587,15 @@ export default function LibraryView({
       } else if (e.key === 'u' || e.key === 'U') {
         e.preventDefault()
         requestMove('root')
+      } else if (e.key === 'Delete' && bucket !== 'deleted') {
+        e.preventDefault()
+        requestDelete()
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
         setSelected(new Set(photos.map((p) => p.name)))
       }
     },
-    [photos, bursts, focused, viewer, confirm, exportOpen, exporting, resetOpen, busy, detecting, requestMove, runUndo, onToggleFullscreen],
+    [photos, bursts, focused, viewer, confirm, exportOpen, exporting, resetOpen, busy, detecting, bucket, requestMove, requestDelete, runUndo, onToggleFullscreen],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -593,7 +610,7 @@ export default function LibraryView({
     try {
       const names = JSON.parse(e.dataTransfer.getData('application/x-sorta-photos')) as string[]
       if (!Array.isArray(names) || names.length === 0) return
-      if (names.length > 1) setConfirm({ to, names })
+      if (names.length > 1 || to === 'deleted') setConfirm({ to, names })
       else void doMove(names, to)
     } catch {
       /* ignore */
@@ -706,6 +723,17 @@ export default function LibraryView({
                 Export
               </button>
             )}
+            {bucket !== 'deleted' && photos.length > 0 && (
+              <button
+                type="button"
+                className="btn btn--delete btn--small"
+                disabled={busy || detecting}
+                onClick={() => requestDelete()}
+                title="Move to Deleted (Delete)"
+              >
+                Delete
+              </button>
+            )}
           </div>
         </div>
 
@@ -730,6 +758,11 @@ export default function LibraryView({
             {bucket !== 'disliked' && (
               <button type="button" className="btn btn--dislike btn--small" disabled={busy} onClick={() => requestMove('disliked')}>
                 Reject
+              </button>
+            )}
+            {bucket !== 'deleted' && (
+              <button type="button" className="btn btn--delete btn--small" disabled={busy} onClick={() => requestDelete()}>
+                Delete
               </button>
             )}
           </div>
@@ -916,6 +949,11 @@ export default function LibraryView({
                     Unclassified <kbd>U</kbd>
                   </button>
                 )}
+                {bucket !== 'deleted' && (
+                  <button type="button" className="btn btn--delete" onClick={() => requestDelete()}>
+                    Delete <kbd>Del</kbd>
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`btn btn--neutral${showExif ? ' btn--exif-on' : ''}`}
@@ -938,19 +976,27 @@ export default function LibraryView({
           <div className="confirm-modal" role="alertdialog" aria-modal="true">
             <div className="confirm-card">
               <p>
-                Move {confirm.names.length} photos to {bucketLabel(confirm.to)}?
+                {confirm.to === 'deleted'
+                  ? `Delete ${confirm.names.length} photo${confirm.names.length === 1 ? '' : 's'}?`
+                  : `Move ${confirm.names.length} photos to ${bucketLabel(confirm.to)}?`}
               </p>
-              <p className="muted">This will physically move the files.</p>
+              <p className="muted">
+                {confirm.to === 'deleted'
+                  ? 'Files (and matching .ARW sidecars) move to deleted/. Undo can restore them.'
+                  : 'This will physically move the files.'}
+              </p>
               <div className="actions">
                 <button type="button" className="btn btn--neutral" onClick={() => setConfirm(null)}>
                   Cancel
                 </button>
                 <button
                   type="button"
-                  className="btn btn--like"
+                  className={confirm.to === 'deleted' ? 'btn btn--delete' : 'btn btn--like'}
                   onClick={() => void doMove(confirm.names, confirm.to)}
                 >
-                  Move {confirm.names.length} Photos
+                  {confirm.to === 'deleted'
+                    ? `Delete ${confirm.names.length}`
+                    : `Move ${confirm.names.length} Photos`}
                 </button>
               </div>
             </div>

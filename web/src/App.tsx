@@ -32,6 +32,7 @@ const emptyStats: Stats = {
   liked: 0,
   disliked: 0,
   review: 0,
+  deleted: 0,
 }
 
 const emptySession: SessionStats = {
@@ -146,7 +147,12 @@ export default function App() {
         const sess = await fetchSession()
         if (sess.mode === 'library') {
           resumeMode = 'library'
-          if (sess.lastBucket === 'liked' || sess.lastBucket === 'review' || sess.lastBucket === 'disliked') {
+          if (
+            sess.lastBucket === 'liked' ||
+            sess.lastBucket === 'review' ||
+            sess.lastBucket === 'disliked' ||
+            sess.lastBucket === 'deleted'
+          ) {
             resumeBucket = sess.lastBucket
           }
           resumePhoto = sess.lastPhoto || undefined
