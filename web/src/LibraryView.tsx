@@ -21,6 +21,7 @@ import {
   type Stats,
 } from './api'
 import { useKeyboard } from './hooks/useKeyboard'
+import ZoomableImage from './ZoomableImage'
 
 type Props = {
   initialBucket?: Bucket
@@ -34,7 +35,7 @@ type Props = {
   onToggleFullscreen: () => void
 }
 
-const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'review', 'disliked', 'deleted']
+const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'posted', 'review', 'disliked', 'deleted']
 const EXPORT_BATCH_SIZE = 30
 const EXPORT_MAX_BYTES = 15 * 1024 * 1024
 
@@ -80,7 +81,7 @@ export default function LibraryView({
   const [photos, setPhotos] = useState<Photo[]>([])
   const [bursts, setBursts] = useState<BurstGroup[]>([])
   const [singles, setSingles] = useState<Photo[]>([])
-  const [counts, setCounts] = useState({ root: 0, liked: 0, review: 0, disliked: 0, deleted: 0 })
+  const [counts, setCounts] = useState({ root: 0, liked: 0, posted: 0, review: 0, disliked: 0, deleted: 0 })
   const [focused, setFocused] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewer, setViewer] = useState<Photo | null>(null)
@@ -104,6 +105,7 @@ export default function LibraryView({
       setCounts({
         root: fs.root,
         liked: fs.liked,
+        posted: fs.posted,
         review: fs.review,
         disliked: fs.disliked,
         deleted: fs.deleted,
@@ -215,6 +217,24 @@ export default function LibraryView({
     return p ? [p.name] : []
   }, [selected, photos, focused])
 
+  const advanceViewerAfterRemove = useCallback((prev: Photo[], removed: Set<string>) => {
+    if (!viewer || !removed.has(viewer.name)) {
+      setFocused((f) => Math.min(f, Math.max(0, prev.length - removed.size - 1)))
+      return
+    }
+    const idx = prev.findIndex((p) => p.name === viewer.name)
+    const next = prev.filter((p) => !removed.has(p.name))
+    if (next.length === 0) {
+      setViewer(null)
+      setFocused(0)
+      return
+    }
+    const nextIdx = Math.min(Math.max(idx, 0), next.length - 1)
+    setFocused(nextIdx)
+    setViewer(next[nextIdx])
+    shownAt.current = Date.now()
+  }, [viewer])
+
   const doMove = useCallback(
     async (names: string[], to: Bucket) => {
       if (names.length === 0 || to === bucket || busy) return
@@ -224,9 +244,8 @@ export default function LibraryView({
           const res = await movePhoto(names[0], bucket, to, Date.now() - shownAt.current)
           const removed = new Set(names)
           setPhotos((prev) => {
-            const next = prev.filter((p) => p.name !== names[0])
-            setFocused((f) => Math.min(f, Math.max(0, next.length - 1)))
-            return next
+            advanceViewerAfterRemove(prev, removed)
+            return prev.filter((p) => p.name !== names[0])
           })
           setBursts((prev) => pruneBursts(prev, removed))
           setSingles((prev) => prev.filter((p) => !removed.has(p.name)))
@@ -235,7 +254,6 @@ export default function LibraryView({
             n.delete(names[0])
             return n
           })
-          if (viewer?.name === names[0]) setViewer(null)
           invalidateCache(bucket, to)
           onStats(res.stats, (await fetchStats()).session)
           if (to === 'deleted') onToast('Moved to Deleted')
@@ -246,14 +264,12 @@ export default function LibraryView({
           )
           const ok = new Set(res.results.filter((r) => r.success).map((r) => r.filename))
           setPhotos((prev) => {
-            const next = prev.filter((p) => !ok.has(p.name))
-            setFocused((f) => Math.min(f, Math.max(0, next.length - 1)))
-            return next
+            advanceViewerAfterRemove(prev, ok)
+            return prev.filter((p) => !ok.has(p.name))
           })
           setBursts((prev) => pruneBursts(prev, ok))
           setSingles((prev) => prev.filter((p) => !ok.has(p.name)))
           setSelected(new Set())
-          if (viewer && ok.has(viewer.name)) setViewer(null)
           invalidateCache(bucket, to)
           onStats(res.stats, (await fetchStats()).session)
           if (res.failedCount > 0) {
@@ -275,7 +291,7 @@ export default function LibraryView({
         setConfirm(null)
       }
     },
-    [bucket, busy, viewer, onStats, onToast, refreshCounts, invalidateCache],
+    [bucket, busy, advanceViewerAfterRemove, onStats, onToast, refreshCounts, invalidateCache],
   )
 
   const requestMove = useCallback(
@@ -382,11 +398,13 @@ export default function LibraryView({
       try {
         const res = await burstKeep(keepName, bucket)
         const moved = new Set(res.moved)
-        setPhotos((prev) => prev.filter((p) => !moved.has(p.name)))
+        setPhotos((prev) => {
+          advanceViewerAfterRemove(prev, moved)
+          return prev.filter((p) => !moved.has(p.name))
+        })
         setBursts((prev) => prev.filter((g) => !g.photos.some((p) => moved.has(p.name))))
         setSingles((prev) => prev.filter((p) => !moved.has(p.name)))
         setSelected(new Set())
-        if (viewer && moved.has(viewer.name)) setViewer(null)
         invalidateCache()
         onToast(`Kept ${keepName} · discarded ${Math.max(0, res.moved.length - 1)}`)
         await refreshCounts()
@@ -398,7 +416,7 @@ export default function LibraryView({
         setBusy(false)
       }
     },
-    [bucket, busy, detecting, viewer, onToast, onStats, refreshCounts, invalidateCache],
+    [bucket, busy, detecting, advanceViewerAfterRemove, onToast, onStats, refreshCounts, invalidateCache],
   )
 
   const toggleSelect = (name: string) => {
@@ -465,15 +483,24 @@ export default function LibraryView({
     (e) => {
       if (detecting) return
       if (confirm) {
-        if (e.key === 'Escape') setConfirm(null)
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setConfirm(null)
+        }
         return
       }
       if (exportOpen) {
-        if (e.key === 'Escape' && !exporting) setExportOpen(false)
+        if (e.key === 'Escape' && !exporting) {
+          e.preventDefault()
+          setExportOpen(false)
+        }
         return
       }
       if (resetOpen) {
-        if (e.key === 'Escape' && !busy) setResetOpen(false)
+        if (e.key === 'Escape' && !busy) {
+          e.preventDefault()
+          setResetOpen(false)
+        }
         return
       }
       if (viewer) {
@@ -483,6 +510,7 @@ export default function LibraryView({
           return
         }
         if (e.key === 'Escape') {
+          e.preventDefault()
           setViewer(null)
           return
         }
@@ -518,13 +546,16 @@ export default function LibraryView({
         if (e.key === 'l' || e.key === 'L') {
           e.preventDefault()
           requestMove('liked')
+        } else if (e.key === 'p' || e.key === 'P') {
+          e.preventDefault()
+          requestMove('posted')
         } else if (e.key === 'd' || e.key === 'D' || e.key === 'x' || e.key === 'X') {
           e.preventDefault()
           requestMove('disliked')
         } else if (e.key === 'r' || e.key === 'R') {
           e.preventDefault()
           requestMove('review')
-        } else         if (e.key === 'u' || e.key === 'U') {
+        } else if (e.key === 'u' || e.key === 'U') {
           e.preventDefault()
           requestMove('root')
         } else if (e.key === 'Delete' && bucket !== 'deleted') {
@@ -575,6 +606,9 @@ export default function LibraryView({
       } else if (e.key === 'l' || e.key === 'L') {
         e.preventDefault()
         requestMove('liked')
+      } else if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault()
+        requestMove('posted')
       } else if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
         requestMove('disliked')
@@ -666,7 +700,7 @@ export default function LibraryView({
             Export Liked
           </button>
         )}
-        {bucket === 'root' && (counts.liked > 0 || counts.review > 0 || counts.disliked > 0) && (
+        {bucket === 'root' && (counts.liked > 0 || counts.posted > 0 || counts.review > 0 || counts.disliked > 0) && (
           <button
             type="button"
             className="btn btn--neutral bucket-review-btn"
@@ -753,6 +787,11 @@ export default function LibraryView({
             {bucket !== 'liked' && (
               <button type="button" className="btn btn--like btn--small" disabled={busy} onClick={() => requestMove('liked')}>
                 Like
+              </button>
+            )}
+            {bucket !== 'posted' && (
+              <button type="button" className="btn btn--posted btn--small" disabled={busy} onClick={() => requestMove('posted')}>
+                Posted
               </button>
             )}
             {bucket !== 'disliked' && (
@@ -908,7 +947,11 @@ export default function LibraryView({
           <div className="library-viewer" role="dialog" aria-modal="true">
             <div className="library-viewer-inner">
               <div className="library-viewer-stage">
-                <img src={imageUrl(viewer.url, 'view')} alt={viewer.name} />
+                <ZoomableImage
+                  src={imageUrl(viewer.url, 'view')}
+                  alt={viewer.name}
+                  resetKey={viewer.name}
+                />
               </div>
               {showExif && (
                 <div className="library-exif">
@@ -942,6 +985,11 @@ export default function LibraryView({
                 {bucket !== 'liked' && (
                   <button type="button" className="btn btn--like" onClick={() => requestMove('liked')}>
                     Like <kbd>L</kbd>
+                  </button>
+                )}
+                {bucket !== 'posted' && (
+                  <button type="button" className="btn btn--posted" onClick={() => requestMove('posted')}>
+                    Posted <kbd>P</kbd>
                   </button>
                 )}
                 {bucket !== 'root' && (
@@ -1061,11 +1109,11 @@ export default function LibraryView({
             <div className="confirm-card export-card">
               <h3 className="export-title">Reset All to Unclassified</h3>
               <p className="muted">
-                Move every photo from Liked, Review, and Disliked back to Unclassified.
+                Move every photo from Liked, Posted, Review, and Disliked back to Unclassified.
                 This can be undone with Undo.
               </p>
               <p className="muted export-meta">
-                {(counts.liked + counts.review + counts.disliked).toLocaleString()} classified photos
+                {(counts.liked + counts.posted + counts.review + counts.disliked).toLocaleString()} classified photos
               </p>
               <div className="actions">
                 <button

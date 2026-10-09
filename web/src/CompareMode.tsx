@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { movePhoto, imageUrl, type Bucket, type Photo } from './api'
 import { useKeyboard } from './hooks/useKeyboard'
+import ZoomableImage from './ZoomableImage'
 
 type Props = {
   photos: Photo[]
@@ -17,6 +18,7 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
 
   useKeyboard((e) => {
     if (e.key === 'Escape') {
+      e.preventDefault()
       if (zoomed) setZoomed(null)
       else onExit()
       return
@@ -69,6 +71,9 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
         <button type="button" className="btn btn--like" onClick={() => void moveActive('liked')}>
           Like focused
         </button>
+        <button type="button" className="btn btn--posted" onClick={() => void moveActive('posted')}>
+          Posted focused
+        </button>
         <button type="button" className="btn btn--review" onClick={() => void moveActive('review')}>
           Review focused
         </button>
@@ -86,7 +91,13 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
         createPortal(
           <div className="library-viewer" onClick={() => setZoomed(null)} role="dialog" aria-modal="true">
             <div className="library-viewer-inner" onClick={(e) => e.stopPropagation()}>
-              <img src={imageUrl(zoomed.url, 'view')} alt={zoomed.name} />
+              <div className="library-viewer-stage">
+                <ZoomableImage
+                  src={imageUrl(zoomed.url, 'view')}
+                  alt={zoomed.name}
+                  resetKey={zoomed.name}
+                />
+              </div>
               <p className="filename">{zoomed.name}</p>
               <button type="button" className="btn btn--neutral" onClick={() => setZoomed(null)}>
                 Close

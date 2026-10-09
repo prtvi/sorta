@@ -18,6 +18,8 @@ import {
 import CompareMode from './CompareMode'
 import LibraryView from './LibraryView'
 import ReviewMode from './ReviewMode'
+import ZoomableImage from './ZoomableImage'
+import { useFullscreen } from './hooks/useFullscreen'
 import { useKeyboard } from './hooks/useKeyboard'
 import './App.css'
 
@@ -30,6 +32,7 @@ const emptyStats: Stats = {
   remaining: 0,
   root: 0,
   liked: 0,
+  posted: 0,
   disliked: 0,
   review: 0,
   deleted: 0,
@@ -72,7 +75,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [anim, setAnim] = useState<AnimDirection>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const [fullscreen, setFullscreen] = useState(false)
+  const { fullscreen, escHolding, toggleFullscreen } = useFullscreen()
   const [showExif, setShowExif] = useState(false)
   const [exif, setExif] = useState<ExifMetadata | null>(null)
   const [reviewQueue, setReviewQueue] = useState<Photo[]>([])
@@ -149,6 +152,7 @@ export default function App() {
           resumeMode = 'library'
           if (
             sess.lastBucket === 'liked' ||
+            sess.lastBucket === 'posted' ||
             sess.lastBucket === 'review' ||
             sess.lastBucket === 'disliked' ||
             sess.lastBucket === 'deleted'
@@ -312,20 +316,6 @@ export default function App() {
     }
   }, [topMode, showToast, refreshSessionStats])
 
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      void document.documentElement.requestFullscreen?.().then(() => setFullscreen(true))
-    } else {
-      void document.exitFullscreen?.().then(() => setFullscreen(false))
-    }
-  }, [])
-
-  useEffect(() => {
-    const onFs = () => setFullscreen(Boolean(document.fullscreenElement))
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
-
   useKeyboard(
     (e) => {
       if (topMode !== 'cull' || subMode !== 'browse') return
@@ -380,11 +370,23 @@ export default function App() {
     void loadCull()
   }
 
-  const switchToLibrary = () => {
+  const switchToLibrary = (bucket?: Bucket) => {
+    if (bucket) {
+      setLibBucket(bucket)
+      setLibPhoto('')
+    }
     setTopMode('library')
     setSubMode('browse')
     setStatus('ready')
   }
+
+  const cullSections: { bucket: Bucket; label: string; count: number }[] = [
+    { bucket: 'liked', label: 'Liked', count: stats.liked },
+    { bucket: 'posted', label: 'Posted', count: stats.posted },
+    { bucket: 'review', label: 'Review', count: stats.review },
+    { bucket: 'disliked', label: 'Disliked', count: stats.disliked },
+    { bucket: 'deleted', label: 'Deleted', count: stats.deleted },
+  ]
 
   return (
     <div className={`app${fullscreen ? ' app--fullscreen' : ''}`}>
@@ -401,7 +403,7 @@ export default function App() {
           <button
             type="button"
             className={`nav-btn${topMode === 'library' ? ' nav-btn--active' : ''}`}
-            onClick={switchToLibrary}
+            onClick={() => switchToLibrary()}
           >
             Library
           </button>
@@ -420,10 +422,20 @@ export default function App() {
             {processed} / {stats.total}
           </div>
         )}
-        <button type="button" className="icon-btn" onClick={toggleFullscreen} title="Fullscreen (F)">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={toggleFullscreen}
+          title={fullscreen ? 'Hold Esc to exit fullscreen' : 'Fullscreen (F)'}
+        >
           {fullscreen ? '⤢' : '⛶'}
         </button>
       </header>
+      {fullscreen && (
+        <div className={`fs-esc-hint${escHolding ? ' fs-esc-hint--holding' : ''}`} aria-live="polite">
+          {escHolding ? 'Keep holding Esc…' : 'Hold Esc to exit fullscreen'}
+        </div>
+      )}
 
       {topMode === 'library' && subMode === 'browse' && (
         <div className="view-pane" key="library-browse">
@@ -505,12 +517,25 @@ export default function App() {
             {status === 'done' && (
               <div className="state state--done">
                 <p className="done-title">All photos have been classified.</p>
+                <p className="muted done-subtitle">
+                  {cullSections.reduce((n, s) => n + s.count, 0).toLocaleString()} photos across all sections
+                </p>
                 <ul className="done-stats">
-                  <li>Liked: {stats.liked}</li>
-                  <li>Disliked: {stats.disliked}</li>
-                  <li>Review: {stats.review}</li>
+                  {cullSections.map((s) => (
+                    <li key={s.bucket}>
+                      <button
+                        type="button"
+                        className={`done-stat done-stat--${s.bucket}`}
+                        onClick={() => switchToLibrary(s.bucket)}
+                        title={`Open ${s.label} in Library`}
+                      >
+                        <span className="done-stat-label">{s.label}</span>
+                        <span className="done-stat-count">{s.count}</span>
+                      </button>
+                    </li>
+                  ))}
                 </ul>
-                <button type="button" className="btn btn--neutral" onClick={switchToLibrary}>
+                <button type="button" className="btn btn--neutral" onClick={() => switchToLibrary()}>
                   Open Library
                 </button>
               </div>
@@ -528,12 +553,12 @@ export default function App() {
                   >
                     ‹
                   </button>
-                  <img
+                  <ZoomableImage
                     key={current.name}
-                    className="viewer-img"
                     src={imageUrl(current.url, 'view')}
                     alt={current.name}
-                    draggable={false}
+                    imgClassName="viewer-img"
+                    resetKey={current.name}
                   />
                   <button
                     type="button"
@@ -602,10 +627,12 @@ export default function App() {
                   </div>
                 )}
                 <div className="counts">
-                  <span>D:{stats.disliked}</span>
-                  <span>R:{stats.review}</span>
-                  <span>L:{stats.liked}</span>
-                  <span>Left:{stats.remaining}</span>
+                  <span title="Liked">L:{stats.liked}</span>
+                  <span title="Posted">P:{stats.posted}</span>
+                  <span title="Review">R:{stats.review}</span>
+                  <span title="Disliked">D:{stats.disliked}</span>
+                  <span title="Deleted">Del:{stats.deleted}</span>
+                  <span title="Unclassified">Left:{stats.remaining}</span>
                 </div>
               </div>
             </footer>

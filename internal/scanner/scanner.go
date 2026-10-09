@@ -12,6 +12,7 @@ import (
 // Classification directories that must not be scanned for photos in the root.
 var skipDirs = map[string]bool{
 	"liked":    true,
+	"posted":   true,
 	"disliked": true,
 	"review":   true,
 	"deleted":  true,
@@ -36,7 +37,7 @@ func IsSupportedImage(name string) bool {
 }
 
 // ScanRoot lists supported image files in the root of dir (non-recursive).
-// Files inside liked/, disliked/, review/, and .sorta/ are ignored.
+// Files inside liked/, posted/, disliked/, review/, deleted/, and .sorta/ are ignored.
 func ScanRoot(dir string) ([]models.Photo, error) {
 	return scanDir(dir, "/photos/")
 }

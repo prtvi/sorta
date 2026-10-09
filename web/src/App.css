@@ -7,6 +7,7 @@
   --dislike: #e85d5d;
   --review: #e0b84a;
   --like: #4ec98a;
+  --posted: #5b9fd4;
   --border: #2a2a2e;
   --font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
   --mono: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
@@ -127,7 +128,8 @@ kbd {
   transition: transform 220ms ease, opacity 220ms ease;
 }
 
-.viewer img {
+.viewer img,
+.viewer .zoomable img {
   max-width: 100%;
   max-height: calc(100vh - 11rem);
   width: auto;
@@ -135,6 +137,12 @@ kbd {
   object-fit: contain;
   user-select: none;
   -webkit-user-drag: none;
+}
+
+.viewer .zoomable {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .exif-overlay {
@@ -261,18 +269,75 @@ kbd {
 .done-title {
   font-size: 1.75rem;
   font-weight: 600;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.35rem;
+}
+
+.done-subtitle {
+  margin: 0 0 0.25rem;
 }
 
 .done-stats {
   list-style: none;
   padding: 0;
-  margin: 1.25rem 0 0;
+  margin: 1.5rem 0 1.75rem;
   display: flex;
-  gap: 1.5rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   justify-content: center;
+  max-width: 36rem;
+}
+
+.done-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 5.5rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.done-stat:hover {
+  border-color: #6a6a72;
+  transform: translateY(-1px);
+}
+
+.done-stat-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--muted);
+}
+
+.done-stat-count {
   font-family: var(--mono);
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.done-stat--liked {
+  border-color: color-mix(in srgb, var(--like) 45%, var(--border));
+}
+
+.done-stat--posted {
+  border-color: color-mix(in srgb, var(--posted) 45%, var(--border));
+}
+
+.done-stat--review {
+  border-color: color-mix(in srgb, var(--review) 45%, var(--border));
+}
+
+.done-stat--disliked {
+  border-color: color-mix(in srgb, var(--dislike) 45%, var(--border));
+}
+
+.done-stat--deleted {
+  border-color: #6a3838;
 }
 
 .footer {
@@ -354,6 +419,11 @@ kbd {
   color: #04140c;
 }
 
+.btn--posted {
+  background: var(--posted);
+  color: #041018;
+}
+
 .btn--neutral {
   background: var(--bg-elevated);
   color: var(--text);
@@ -367,14 +437,13 @@ kbd {
 
 .counts {
   display: flex;
-  flex-wrap: nowrap;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.75rem;
   justify-content: center;
   align-items: center;
   font-family: var(--mono);
   font-size: 0.75rem;
   color: var(--muted);
-  white-space: nowrap;
 }
 
 .toast {
@@ -944,13 +1013,58 @@ kbd {
 }
 
 .library-viewer-inner img,
-.library-viewer-stage img {
+.library-viewer-stage img,
+.library-viewer-stage .zoomable img {
   max-width: 100%;
   max-height: min(70vh, calc(100vh - 12rem));
   width: auto;
   height: auto;
   object-fit: contain;
   display: block;
+}
+
+.library-viewer-stage .zoomable {
+  width: 100%;
+  min-height: min(70vh, calc(100vh - 12rem));
+}
+
+.zoomable {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.zoomable img {
+  transform-origin: center center;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.zoomable--zoomed {
+  cursor: grab;
+}
+
+.zoomable--dragging {
+  cursor: grabbing;
+}
+
+.zoomable-badge {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.65rem;
+  z-index: 2;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  pointer-events: none;
 }
 
 .review-mode,
@@ -1031,5 +1145,41 @@ kbd {
 
 .app--fullscreen:hover .header {
   opacity: 1;
+}
+
+body.sorta-css-fullscreen {
+  overflow: hidden;
+}
+
+body.sorta-css-fullscreen .app {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg);
+}
+
+.fs-esc-hint {
+  position: fixed;
+  top: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(20, 20, 24, 0.82);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.fs-esc-hint--holding {
+  opacity: 1;
+  color: var(--text);
+  border-color: #6a6a72;
 }
 

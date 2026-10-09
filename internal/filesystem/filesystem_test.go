@@ -18,7 +18,7 @@ func TestNewStoreAndEnsureDirs(t *testing.T) {
 	if err := store.EnsureClassificationDirs(); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"liked", "disliked", "review", "deleted"} {
+	for _, name := range []string{"liked", "posted", "disliked", "review", "deleted"} {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || !info.IsDir() {
 			t.Fatalf("missing dir %s: %v", name, err)

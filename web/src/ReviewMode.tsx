@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { movePhoto, undoLast, imageUrl, type Photo, type Stats } from './api'
 import { useKeyboard } from './hooks/useKeyboard'
+import ZoomableImage from './ZoomableImage'
 
 type Props = {
   photos: Photo[]
@@ -70,6 +71,7 @@ export default function ReviewMode({
   useKeyboard(
     (e) => {
       if (e.key === 'Escape') {
+        e.preventDefault()
         onExit()
         return
       }
@@ -120,7 +122,12 @@ export default function ReviewMode({
         </button>
       </header>
       <div className="viewer">
-        <img key={current.name} src={imageUrl(current.url, 'view')} alt={current.name} />
+        <ZoomableImage
+          key={current.name}
+          src={imageUrl(current.url, 'view')}
+          alt={current.name}
+          resetKey={current.name}
+        />
       </div>
       <p className="filename">{current.name}</p>
       <div className="actions">
