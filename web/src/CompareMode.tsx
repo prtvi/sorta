@@ -71,8 +71,8 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
         <button type="button" className="btn btn--like" onClick={() => void moveActive('liked')}>
           Like focused
         </button>
-        <button type="button" className="btn btn--posted" onClick={() => void moveActive('posted')}>
-          Posted focused
+        <button type="button" className="btn btn--posting" onClick={() => void moveActive('posting')}>
+          Posting focused
         </button>
         <button type="button" className="btn btn--review" onClick={() => void moveActive('review')}>
           Review focused

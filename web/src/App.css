@@ -7,7 +7,7 @@
   --dislike: #e85d5d;
   --review: #e0b84a;
   --like: #4ec98a;
-  --posted: #5b9fd4;
+  --posting: #5b9fd4;
   --border: #2a2a2e;
   --font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
   --mono: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
@@ -324,8 +324,8 @@ kbd {
   border-color: color-mix(in srgb, var(--like) 45%, var(--border));
 }
 
-.done-stat--posted {
-  border-color: color-mix(in srgb, var(--posted) 45%, var(--border));
+.done-stat--posting {
+  border-color: color-mix(in srgb, var(--posting) 45%, var(--border));
 }
 
 .done-stat--review {
@@ -419,8 +419,8 @@ kbd {
   color: #04140c;
 }
 
-.btn--posted {
-  background: var(--posted);
+.btn--posting {
+  background: var(--posting);
   color: #041018;
 }
 

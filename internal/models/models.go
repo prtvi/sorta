@@ -6,7 +6,7 @@ type Bucket string
 const (
 	BucketRoot     Bucket = "root"
 	BucketLiked    Bucket = "liked"
-	BucketPosted   Bucket = "posted"
+	BucketPosting  Bucket = "posting"
 	BucketReview   Bucket = "review"
 	BucketDisliked Bucket = "disliked"
 	BucketDeleted  Bucket = "deleted"
@@ -15,7 +15,7 @@ const (
 // Valid reports whether b is a known bucket.
 func (b Bucket) Valid() bool {
 	switch b {
-	case BucketRoot, BucketLiked, BucketPosted, BucketReview, BucketDisliked, BucketDeleted:
+	case BucketRoot, BucketLiked, BucketPosting, BucketReview, BucketDisliked, BucketDeleted:
 		return true
 	default:
 		return false
@@ -132,7 +132,7 @@ type Stats struct {
 	Remaining int `json:"remaining"` // unclassified (root); kept for Cull UI
 	Root      int `json:"root"`
 	Liked     int `json:"liked"`
-	Posted    int `json:"posted"`
+	Posting   int `json:"posting"`
 	Disliked  int `json:"disliked"`
 	Review    int `json:"review"`
 	Deleted   int `json:"deleted"`

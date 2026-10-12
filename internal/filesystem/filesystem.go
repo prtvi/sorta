@@ -11,7 +11,7 @@ import (
 )
 
 // ClassificationDirs are created under the working directory at startup.
-var ClassificationDirs = []string{"liked", "posted", "disliked", "review", "deleted"}
+var ClassificationDirs = []string{"liked", "posting", "disliked", "review", "deleted"}
 
 // Store performs safe filesystem operations constrained to a root directory.
 type Store struct {
@@ -34,7 +34,7 @@ func NewStore(root string) (*Store, error) {
 	return &Store{Root: abs}, nil
 }
 
-// EnsureClassificationDirs creates liked/, posted/, disliked/, review/, and deleted/ if missing.
+// EnsureClassificationDirs creates liked/, posting/, disliked/, review/, and deleted/ if missing.
 func (s *Store) EnsureClassificationDirs() error {
 	for _, name := range ClassificationDirs {
 		dir := filepath.Join(s.Root, name)
@@ -146,7 +146,7 @@ func (s *Store) FindInLibrary(name string) (string, error) {
 	for _, b := range []models.Bucket{
 		models.BucketRoot,
 		models.BucketLiked,
-		models.BucketPosted,
+		models.BucketPosting,
 		models.BucketReview,
 		models.BucketDisliked,
 		models.BucketDeleted,
@@ -286,7 +286,7 @@ func companionDestination(destDir, photoDest, companionSrc string) (string, erro
 	return uniqueDestination(dest)
 }
 
-// ListLibraryBucket returns photos in a bucket (root|liked|posted|review|disliked|deleted).
+// ListLibraryBucket returns photos in a bucket (root|liked|posting|review|disliked|deleted).
 func (s *Store) ListLibraryBucket(bucket models.Bucket) ([]models.Photo, error) {
 	if !bucket.LibraryBucket() {
 		return nil, fmt.Errorf("invalid library bucket")
@@ -371,7 +371,7 @@ func (s *Store) CollectStats() (models.Stats, error) {
 	if err != nil {
 		return models.Stats{}, err
 	}
-	posted, err := scanner.CountInDir(filepath.Join(s.Root, "posted"))
+	posting, err := scanner.CountInDir(filepath.Join(s.Root, "posting"))
 	if err != nil {
 		return models.Stats{}, err
 	}
@@ -388,11 +388,11 @@ func (s *Store) CollectStats() (models.Stats, error) {
 		return models.Stats{}, err
 	}
 	return models.Stats{
-		Total:     remaining + liked + posted + disliked + review,
+		Total:     remaining + liked + posting + disliked + review,
 		Remaining: remaining,
 		Root:      remaining,
 		Liked:     liked,
-		Posted:    posted,
+		Posting:   posting,
 		Disliked:  disliked,
 		Review:    review,
 		Deleted:   deleted,

@@ -32,7 +32,7 @@ const emptyStats: Stats = {
   remaining: 0,
   root: 0,
   liked: 0,
-  posted: 0,
+  posting: 0,
   disliked: 0,
   review: 0,
   deleted: 0,
@@ -152,7 +152,7 @@ export default function App() {
           resumeMode = 'library'
           if (
             sess.lastBucket === 'liked' ||
-            sess.lastBucket === 'posted' ||
+            sess.lastBucket === 'posting' ||
             sess.lastBucket === 'review' ||
             sess.lastBucket === 'disliked' ||
             sess.lastBucket === 'deleted'
@@ -382,7 +382,7 @@ export default function App() {
 
   const cullSections: { bucket: Bucket; label: string; count: number }[] = [
     { bucket: 'liked', label: 'Liked', count: stats.liked },
-    { bucket: 'posted', label: 'Posted', count: stats.posted },
+    { bucket: 'posting', label: 'Posting', count: stats.posting },
     { bucket: 'review', label: 'Review', count: stats.review },
     { bucket: 'disliked', label: 'Disliked', count: stats.disliked },
     { bucket: 'deleted', label: 'Deleted', count: stats.deleted },
@@ -628,7 +628,7 @@ export default function App() {
                 )}
                 <div className="counts">
                   <span title="Liked">L:{stats.liked}</span>
-                  <span title="Posted">P:{stats.posted}</span>
+                  <span title="Posting">P:{stats.posting}</span>
                   <span title="Review">R:{stats.review}</span>
                   <span title="Disliked">D:{stats.disliked}</span>
                   <span title="Deleted">Del:{stats.deleted}</span>

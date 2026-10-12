@@ -35,7 +35,7 @@ type Props = {
   onToggleFullscreen: () => void
 }
 
-const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'posted', 'review', 'disliked', 'deleted']
+const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'posting', 'review', 'disliked', 'deleted']
 const EXPORT_BATCH_SIZE = 30
 const EXPORT_MAX_BYTES = 15 * 1024 * 1024
 
@@ -81,7 +81,7 @@ export default function LibraryView({
   const [photos, setPhotos] = useState<Photo[]>([])
   const [bursts, setBursts] = useState<BurstGroup[]>([])
   const [singles, setSingles] = useState<Photo[]>([])
-  const [counts, setCounts] = useState({ root: 0, liked: 0, posted: 0, review: 0, disliked: 0, deleted: 0 })
+  const [counts, setCounts] = useState({ root: 0, liked: 0, posting: 0, review: 0, disliked: 0, deleted: 0 })
   const [focused, setFocused] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewer, setViewer] = useState<Photo | null>(null)
@@ -105,7 +105,7 @@ export default function LibraryView({
       setCounts({
         root: fs.root,
         liked: fs.liked,
-        posted: fs.posted,
+        posting: fs.posting,
         review: fs.review,
         disliked: fs.disliked,
         deleted: fs.deleted,
@@ -548,7 +548,7 @@ export default function LibraryView({
           requestMove('liked')
         } else if (e.key === 'p' || e.key === 'P') {
           e.preventDefault()
-          requestMove('posted')
+          requestMove('posting')
         } else if (e.key === 'd' || e.key === 'D' || e.key === 'x' || e.key === 'X') {
           e.preventDefault()
           requestMove('disliked')
@@ -608,7 +608,7 @@ export default function LibraryView({
         requestMove('liked')
       } else if (e.key === 'p' || e.key === 'P') {
         e.preventDefault()
-        requestMove('posted')
+        requestMove('posting')
       } else if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
         requestMove('disliked')
@@ -700,7 +700,7 @@ export default function LibraryView({
             Export Liked
           </button>
         )}
-        {bucket === 'root' && (counts.liked > 0 || counts.posted > 0 || counts.review > 0 || counts.disliked > 0) && (
+        {bucket === 'root' && (counts.liked > 0 || counts.posting > 0 || counts.review > 0 || counts.disliked > 0) && (
           <button
             type="button"
             className="btn btn--neutral bucket-review-btn"
@@ -789,9 +789,9 @@ export default function LibraryView({
                 Like
               </button>
             )}
-            {bucket !== 'posted' && (
-              <button type="button" className="btn btn--posted btn--small" disabled={busy} onClick={() => requestMove('posted')}>
-                Posted
+            {bucket !== 'posting' && (
+              <button type="button" className="btn btn--posting btn--small" disabled={busy} onClick={() => requestMove('posting')}>
+                Posting
               </button>
             )}
             {bucket !== 'disliked' && (
@@ -987,9 +987,9 @@ export default function LibraryView({
                     Like <kbd>L</kbd>
                   </button>
                 )}
-                {bucket !== 'posted' && (
-                  <button type="button" className="btn btn--posted" onClick={() => requestMove('posted')}>
-                    Posted <kbd>P</kbd>
+                {bucket !== 'posting' && (
+                  <button type="button" className="btn btn--posting" onClick={() => requestMove('posting')}>
+                    Posting <kbd>P</kbd>
                   </button>
                 )}
                 {bucket !== 'root' && (
@@ -1109,11 +1109,11 @@ export default function LibraryView({
             <div className="confirm-card export-card">
               <h3 className="export-title">Reset All to Unclassified</h3>
               <p className="muted">
-                Move every photo from Liked, Posted, Review, and Disliked back to Unclassified.
+                Move every photo from Liked, Posting, Review, and Disliked back to Unclassified.
                 This can be undone with Undo.
               </p>
               <p className="muted export-meta">
-                {(counts.liked + counts.posted + counts.review + counts.disliked).toLocaleString()} classified photos
+                {(counts.liked + counts.posting + counts.review + counts.disliked).toLocaleString()} classified photos
               </p>
               <div className="actions">
                 <button

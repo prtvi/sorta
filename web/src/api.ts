@@ -1,5 +1,5 @@
 export type PhotoAction = 'liked' | 'disliked' | 'review'
-export type Bucket = 'root' | 'liked' | 'posted' | 'review' | 'disliked' | 'deleted'
+export type Bucket = 'root' | 'liked' | 'posting' | 'review' | 'disliked' | 'deleted'
 export type AppMode = 'cull' | 'library' | 'review' | 'compare'
 export type ImageSize = 'view' | 'thumb'
 
@@ -27,7 +27,7 @@ export interface Stats {
   remaining: number
   root: number
   liked: number
-  posted: number
+  posting: number
   disliked: number
   review: number
   deleted: number

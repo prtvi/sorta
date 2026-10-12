@@ -563,7 +563,7 @@ func (s *Server) handleMoveBulk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResetUnclassified(w http.ResponseWriter, r *http.Request) {
-	sources := []models.Bucket{models.BucketLiked, models.BucketPosted, models.BucketReview, models.BucketDisliked}
+	sources := []models.Bucket{models.BucketLiked, models.BucketPosting, models.BucketReview, models.BucketDisliked}
 	var records []models.ActionRecord
 	moved, failed := 0, 0
 
