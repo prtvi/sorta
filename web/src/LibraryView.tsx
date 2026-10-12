@@ -94,10 +94,13 @@ export default function LibraryView({
   const [exportPath, setExportPath] = useState('')
   const [exporting, setExporting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState<'tools' | 'export' | null>(null)
   const lastClickRef = useRef<number>(-1)
   const shownAt = useRef(Date.now())
   const cacheRef = useRef<Map<Bucket, LibraryResponse>>(new Map())
   const loadGen = useRef(0)
+  const toolsMenuRef = useRef<HTMLDivElement>(null)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
 
   const applyCountsFromStats = useCallback(
     (fs: Stats) => {
@@ -474,6 +477,17 @@ export default function LibraryView({
   }, [viewer?.name])
 
   useEffect(() => {
+    if (!openMenu) return
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (toolsMenuRef.current?.contains(t) || exportMenuRef.current?.contains(t)) return
+      setOpenMenu(null)
+    }
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
+  }, [openMenu])
+
+  useEffect(() => {
     if (!viewer || !showExif) {
       if (!showExif) setExif(null)
       return
@@ -507,6 +521,13 @@ export default function LibraryView({
         if (e.key === 'Escape') {
           e.preventDefault()
           setConfirm(null)
+        }
+        return
+      }
+      if (openMenu) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setOpenMenu(null)
         }
         return
       }
@@ -655,7 +676,7 @@ export default function LibraryView({
         setSelected(new Set(photos.map((p) => p.name)))
       }
     },
-    [photos, bursts, focused, viewer, confirm, exportOpen, exporting, resetOpen, busy, detecting, bucket, requestMove, runUndo, onToggleFullscreen, revealInFinder],
+    [photos, bursts, focused, viewer, confirm, openMenu, exportOpen, exporting, resetOpen, busy, detecting, bucket, requestMove, runUndo, onToggleFullscreen, revealInFinder],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -704,29 +725,6 @@ export default function LibraryView({
             <span className="bucket-count">{counts[b]}</span>
           </button>
         ))}
-        {bucket === 'liked' && photos.length > 0 && (
-          <button
-            type="button"
-            className="btn btn--like bucket-sharing-btn"
-            disabled={busy || exporting || detecting}
-            onClick={() => {
-              setExportPath((p) => p || '~/Desktop/sorta-liked-export')
-              setExportOpen(true)
-            }}
-          >
-            Export Liked
-          </button>
-        )}
-        {bucket === 'root' && (counts.liked > 0 || counts.posting > 0 || counts.sharing > 0 || counts.disliked > 0) && (
-          <button
-            type="button"
-            className="btn btn--neutral bucket-sharing-btn"
-            disabled={busy || detecting}
-            onClick={() => setResetOpen(true)}
-          >
-            Reset All to Unclassified
-          </button>
-        )}
       </aside>
 
       <section className="library-main">
@@ -740,18 +738,16 @@ export default function LibraryView({
             <button
               type="button"
               className="btn btn--neutral btn--small"
-              disabled={busy || detecting || photos.length === 0}
-              onClick={() => void runDetectBursts()}
-              title="Scan EXIF times and group bursts (≥3 frames within 1s)"
+              disabled={photos.length === 0 || detecting}
+              onClick={() => setSelected(new Set(photos.map((p) => p.name)))}
             >
-              {detecting ? 'Detecting…' : 'Detect bursts'}
-            </button>
-            <button type="button" className="btn btn--neutral btn--small" onClick={() => setSelected(new Set(photos.map((p) => p.name)))}>
               Select All
             </button>
-            <button type="button" className="btn btn--neutral btn--small" onClick={() => setSelected(new Set())}>
-              Clear
-            </button>
+            {selected.size > 0 && (
+              <button type="button" className="btn btn--neutral btn--small" onClick={() => setSelected(new Set())}>
+                Clear
+              </button>
+            )}
             {compareReady && (
               <button
                 type="button"
@@ -761,28 +757,97 @@ export default function LibraryView({
                 Compare
               </button>
             )}
-            <button
-              type="button"
-              className="btn btn--neutral btn--small"
-              disabled={detecting || photos.length === 0}
-              title={`Export ${bucketLabel(bucket)} file names as JSON`}
-              onClick={() => void exportBucketFileList(bucket)}
-            >
-              Export JSON
-            </button>
-            {bucket === 'liked' && photos.length > 0 && (
+
+            <div className="toolbar-menu" ref={toolsMenuRef}>
               <button
                 type="button"
-                className="btn btn--like btn--small"
-                disabled={busy || exporting || detecting}
-                onClick={() => {
-                  setExportPath((p) => p || '~/Desktop/sorta-liked-export')
-                  setExportOpen(true)
-                }}
+                className={`btn btn--neutral btn--small${openMenu === 'tools' ? ' btn--menu-open' : ''}`}
+                disabled={detecting}
+                aria-haspopup="menu"
+                aria-expanded={openMenu === 'tools'}
+                onClick={() => setOpenMenu((m) => (m === 'tools' ? null : 'tools'))}
               >
-                Export
+                Tools ▾
               </button>
-            )}
+              {openMenu === 'tools' && (
+                <div className="toolbar-menu-panel" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="toolbar-menu-item"
+                    disabled={busy || detecting || photos.length === 0}
+                    onClick={() => {
+                      setOpenMenu(null)
+                      void runDetectBursts()
+                    }}
+                  >
+                    {detecting ? 'Detecting bursts…' : 'Detect bursts'}
+                  </button>
+                  {bucket === 'root' && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="toolbar-menu-item toolbar-menu-item--danger"
+                      disabled={
+                        busy ||
+                        detecting ||
+                        (counts.liked === 0 && counts.posting === 0 && counts.sharing === 0 && counts.disliked === 0)
+                      }
+                      onClick={() => {
+                        setOpenMenu(null)
+                        setResetOpen(true)
+                      }}
+                    >
+                      Reset all to Unclassified
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="toolbar-menu" ref={exportMenuRef}>
+              <button
+                type="button"
+                className={`btn btn--neutral btn--small${openMenu === 'export' ? ' btn--menu-open' : ''}`}
+                disabled={detecting || exporting}
+                aria-haspopup="menu"
+                aria-expanded={openMenu === 'export'}
+                onClick={() => setOpenMenu((m) => (m === 'export' ? null : 'export'))}
+              >
+                Export ▾
+              </button>
+              {openMenu === 'export' && (
+                <div className="toolbar-menu-panel" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="toolbar-menu-item"
+                    disabled={photos.length === 0}
+                    onClick={() => {
+                      setOpenMenu(null)
+                      void exportBucketFileList(bucket)
+                    }}
+                  >
+                    File names (JSON)
+                  </button>
+                  {bucket === 'liked' && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="toolbar-menu-item"
+                      disabled={busy || exporting || photos.length === 0}
+                      onClick={() => {
+                        setOpenMenu(null)
+                        setExportPath((p) => p || '~/Desktop/sorta-liked-export')
+                        setExportOpen(true)
+                      }}
+                    >
+                      Liked photos…
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

@@ -633,10 +633,6 @@ kbd {
   font-size: 0.8rem;
 }
 
-.bucket-sharing-btn {
-  margin-top: var(--space-3);
-}
-
 .library-main {
   display: flex;
   flex-direction: column;
@@ -658,6 +654,56 @@ kbd {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.toolbar-menu {
+  position: relative;
+}
+
+.btn--menu-open {
+  border-color: var(--text);
+}
+
+.toolbar-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 20;
+  min-width: 12.5rem;
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.toolbar-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.25rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.toolbar-menu-item:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.toolbar-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-menu-item--danger {
+  color: var(--dislike, #e07070);
 }
 
 .selection-bar {
