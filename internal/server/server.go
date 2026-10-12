@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/library/{bucket}", s.handleLibrary)
 	mux.HandleFunc("POST /api/library/{bucket}/detect-bursts", s.handleDetectBursts)
 	mux.HandleFunc("GET /api/photos/{filename}/exif", s.handleExif)
+	mux.HandleFunc("POST /api/photos/{filename}/reveal", s.handleReveal)
 	mux.HandleFunc("POST /api/photos/{filename}/action", s.handleAction)
 	mux.HandleFunc("POST /api/photos/{filename}/burst-keep", s.handleBurstKeep)
 	mux.HandleFunc("POST /api/photos/move", s.handleMove)
@@ -102,8 +103,8 @@ func (s *Server) recordSessionMove(to models.Bucket, decisionMs int64) {
 		s.session.Liked++
 	case models.BucketDisliked:
 		s.session.Disliked++
-	case models.BucketReview:
-		s.session.Review++
+	case models.BucketSharing:
+		s.session.Sharing++
 	}
 	if decisionMs > 0 {
 		s.decisionSumMs += decisionMs

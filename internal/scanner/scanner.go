@@ -13,9 +13,10 @@ import (
 var skipDirs = map[string]bool{
 	"liked":    true,
 	"posting":  true,
+	"sharing":  true,
 	"disliked": true,
-	"review":   true,
-	"deleted":  true,
+	"review":   true, // legacy folder name; ignored if present
+	"deleted":  true, // legacy folder name; ignored if present
 	".sorta":   true,
 }
 
@@ -37,7 +38,8 @@ func IsSupportedImage(name string) bool {
 }
 
 // ScanRoot lists supported image files in the root of dir (non-recursive).
-// Files inside liked/, posting/, disliked/, review/, deleted/, and .sorta/ are ignored.
+// Files inside liked/, posting/, sharing/, disliked/, and .sorta/ are ignored.
+// Leftover review/ or deleted/ dirs (legacy) are also skipped if present.
 func ScanRoot(dir string) ([]models.Photo, error) {
 	return scanDir(dir, "/photos/")
 }

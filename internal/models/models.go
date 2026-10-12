@@ -7,15 +7,14 @@ const (
 	BucketRoot     Bucket = "root"
 	BucketLiked    Bucket = "liked"
 	BucketPosting  Bucket = "posting"
-	BucketReview   Bucket = "review"
+	BucketSharing  Bucket = "sharing"
 	BucketDisliked Bucket = "disliked"
-	BucketDeleted  Bucket = "deleted"
 )
 
 // Valid reports whether b is a known bucket.
 func (b Bucket) Valid() bool {
 	switch b {
-	case BucketRoot, BucketLiked, BucketPosting, BucketReview, BucketDisliked, BucketDeleted:
+	case BucketRoot, BucketLiked, BucketPosting, BucketSharing, BucketDisliked:
 		return true
 	default:
 		return false
@@ -44,13 +43,13 @@ type PhotoAction string
 const (
 	ActionLiked    PhotoAction = "liked"
 	ActionDisliked PhotoAction = "disliked"
-	ActionReview   PhotoAction = "review"
+	ActionSharing  PhotoAction = "sharing"
 )
 
 // Valid reports whether a is a known action.
 func (a PhotoAction) Valid() bool {
 	switch a {
-	case ActionLiked, ActionDisliked, ActionReview:
+	case ActionLiked, ActionDisliked, ActionSharing:
 		return true
 	default:
 		return false
@@ -133,9 +132,8 @@ type Stats struct {
 	Root      int `json:"root"`
 	Liked     int `json:"liked"`
 	Posting   int `json:"posting"`
+	Sharing   int `json:"sharing"`
 	Disliked  int `json:"disliked"`
-	Review    int `json:"review"`
-	Deleted   int `json:"deleted"`
 }
 
 // SessionStats tracks actions in the current process only.
@@ -143,7 +141,7 @@ type SessionStats struct {
 	Reviewed           int     `json:"reviewed"`
 	Liked              int     `json:"liked"`
 	Disliked           int     `json:"disliked"`
-	Review             int     `json:"review"`
+	Sharing            int     `json:"sharing"`
 	AvgDecisionSeconds float64 `json:"avg_decision_seconds"`
 }
 
@@ -261,6 +259,12 @@ type ErrorResponse struct {
 	Success bool      `json:"success"`
 	Error   ErrorBody `json:"error"`
 	Reason  string    `json:"reason,omitempty"`
+}
+
+// RevealResponse is returned after revealing a photo in the system file manager.
+type RevealResponse struct {
+	Success bool   `json:"success"`
+	Path    string `json:"path,omitempty"`
 }
 
 // ExifMetadata is display EXIF for a photo (no GPS coordinates).

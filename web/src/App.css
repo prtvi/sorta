@@ -5,7 +5,7 @@
   --text: #f2f2f3;
   --muted: #8a8a8e;
   --dislike: #e85d5d;
-  --review: #e0b84a;
+  --sharing: #e0b84a;
   --like: #4ec98a;
   --posting: #5b9fd4;
   --border: #2a2a2e;
@@ -328,16 +328,12 @@ kbd {
   border-color: color-mix(in srgb, var(--posting) 45%, var(--border));
 }
 
-.done-stat--review {
-  border-color: color-mix(in srgb, var(--review) 45%, var(--border));
+.done-stat--sharing {
+  border-color: color-mix(in srgb, var(--sharing) 45%, var(--border));
 }
 
 .done-stat--disliked {
   border-color: color-mix(in srgb, var(--dislike) 45%, var(--border));
-}
-
-.done-stat--deleted {
-  border-color: #6a3838;
 }
 
 .footer {
@@ -409,8 +405,8 @@ kbd {
   border: 1px solid #6a3838;
 }
 
-.btn--review {
-  background: var(--review);
+.btn--sharing {
+  background: var(--sharing);
   color: #1a1404;
 }
 
@@ -637,7 +633,7 @@ kbd {
   font-size: 0.8rem;
 }
 
-.bucket-review-btn {
+.bucket-sharing-btn {
   margin-top: var(--space-3);
 }
 
@@ -1067,7 +1063,6 @@ kbd {
   pointer-events: none;
 }
 
-.review-mode,
 .compare-mode {
   display: flex;
   flex-direction: column;
@@ -1078,7 +1073,6 @@ kbd {
   padding: var(--space-2) var(--space-3) var(--space-3);
 }
 
-.review-header,
 .compare-header {
   width: 100%;
   max-width: 1200px;

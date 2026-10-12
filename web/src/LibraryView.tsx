@@ -11,6 +11,7 @@ import {
   movePhoto,
   movePhotosBulk,
   resetToUnclassified,
+  revealPhoto,
   undoLast,
   type Bucket,
   type BurstGroup,
@@ -26,7 +27,6 @@ import ZoomableImage from './ZoomableImage'
 type Props = {
   initialBucket?: Bucket
   initialPhoto?: string
-  onOpenReview: (photos: Photo[]) => void
   onOpenCompare: (photos: Photo[], bucket: Bucket) => void
   onStats: (fs: Stats, session: SessionStats) => void
   onToast: (msg: string) => void
@@ -35,7 +35,7 @@ type Props = {
   onToggleFullscreen: () => void
 }
 
-const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'posting', 'review', 'disliked', 'deleted']
+const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'posting', 'sharing', 'disliked']
 const EXPORT_BATCH_SIZE = 30
 const EXPORT_MAX_BYTES = 15 * 1024 * 1024
 
@@ -67,7 +67,6 @@ function exifLines(meta: ExifMetadata | null): string[] {
 export default function LibraryView({
   initialBucket = 'root',
   initialPhoto,
-  onOpenReview,
   onOpenCompare,
   onStats,
   onToast,
@@ -81,7 +80,7 @@ export default function LibraryView({
   const [photos, setPhotos] = useState<Photo[]>([])
   const [bursts, setBursts] = useState<BurstGroup[]>([])
   const [singles, setSingles] = useState<Photo[]>([])
-  const [counts, setCounts] = useState({ root: 0, liked: 0, posting: 0, review: 0, disliked: 0, deleted: 0 })
+  const [counts, setCounts] = useState({ root: 0, liked: 0, posting: 0, sharing: 0, disliked: 0 })
   const [focused, setFocused] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewer, setViewer] = useState<Photo | null>(null)
@@ -106,9 +105,8 @@ export default function LibraryView({
         root: fs.root,
         liked: fs.liked,
         posting: fs.posting,
-        review: fs.review,
+        sharing: fs.sharing,
         disliked: fs.disliked,
-        deleted: fs.deleted,
       })
     },
     [],
@@ -256,7 +254,6 @@ export default function LibraryView({
           })
           invalidateCache(bucket, to)
           onStats(res.stats, (await fetchStats()).session)
-          if (to === 'deleted') onToast('Moved to Deleted')
         } else {
           const res = await movePhotosBulk(
             names.map((filename) => ({ filename, from: bucket })),
@@ -273,13 +270,9 @@ export default function LibraryView({
           invalidateCache(bucket, to)
           onStats(res.stats, (await fetchStats()).session)
           if (res.failedCount > 0) {
-            onToast(
-              to === 'deleted'
-                ? `Deleted ${res.movedCount}. ${res.failedCount} failed.`
-                : `Moved ${res.movedCount}. ${res.failedCount} could not be moved.`,
-            )
+            onToast(`Moved ${res.movedCount}. ${res.failedCount} could not be moved.`)
           } else {
-            onToast(to === 'deleted' ? `Deleted ${res.movedCount} photos` : `Moved ${res.movedCount} photos`)
+            onToast(`Moved ${res.movedCount} photos`)
           }
         }
         await refreshCounts()
@@ -298,7 +291,7 @@ export default function LibraryView({
     (to: Bucket) => {
       const names = targets()
       if (names.length === 0) return
-      if (names.length > 1 || to === 'deleted') {
+      if (names.length > 1) {
         setConfirm({ to, names })
         return
       }
@@ -306,11 +299,6 @@ export default function LibraryView({
     },
     [targets, doMove],
   )
-
-  const requestDelete = useCallback(() => {
-    if (bucket === 'deleted') return
-    requestMove('deleted')
-  }, [bucket, requestMove])
 
   const runUndo = useCallback(async () => {
     try {
@@ -348,6 +336,32 @@ export default function LibraryView({
       setExporting(false)
     }
   }, [exportPath, onToast])
+
+  const exportBucketFileList = useCallback(
+    async (b: Bucket) => {
+      try {
+        let data = cacheRef.current.get(b)
+        if (!data) {
+          data = await fetchLibrary(b)
+          cacheRef.current.set(b, data)
+        }
+        const files = data.photos.map((p) => p.name)
+        const category = b === 'root' ? 'unclassified' : b
+        const payload = { category, count: files.length, files }
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `sorta-${category}-files.json`
+        a.click()
+        URL.revokeObjectURL(url)
+        onToast(`Exported ${files.length} file name${files.length === 1 ? '' : 's'} from ${bucketLabel(b)}`)
+      } catch (e) {
+        onToast(e instanceof Error ? e.message : 'Could not export file list')
+      }
+    },
+    [onToast],
+  )
 
   const runResetUnclassified = useCallback(async () => {
     setBusy(true)
@@ -479,6 +493,13 @@ export default function LibraryView({
 
   const gridCols = 6
 
+  const revealInFinder = useCallback(() => {
+    if (!viewer) return
+    void revealPhoto(viewer.name, bucket)
+      .then(() => onToast('Shown in Finder'))
+      .catch((err: unknown) => onToast(err instanceof Error ? err.message : 'Could not show in Finder'))
+  }, [viewer, bucket, onToast])
+
   useKeyboard(
     (e) => {
       if (detecting) return
@@ -507,6 +528,11 @@ export default function LibraryView({
         if (e.key === 'i' || e.key === 'I') {
           e.preventDefault()
           setShowExif((p) => !p)
+          return
+        }
+        if (e.key === 'o' || e.key === 'O') {
+          e.preventDefault()
+          revealInFinder()
           return
         }
         if (e.key === 'Escape') {
@@ -552,15 +578,15 @@ export default function LibraryView({
         } else if (e.key === 'd' || e.key === 'D' || e.key === 'x' || e.key === 'X') {
           e.preventDefault()
           requestMove('disliked')
-        } else if (e.key === 'r' || e.key === 'R') {
+        } else if (e.key === 's' || e.key === 'S') {
           e.preventDefault()
-          requestMove('review')
+          requestMove('sharing')
         } else if (e.key === 'u' || e.key === 'U') {
           e.preventDefault()
           requestMove('root')
-        } else if (e.key === 'Delete' && bucket !== 'deleted') {
+        } else if (e.key === 'Delete' && bucket !== 'disliked') {
           e.preventDefault()
-          requestDelete()
+          requestMove('disliked')
         } else if (e.key === 'Backspace' || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z')) {
           e.preventDefault()
           void runUndo()
@@ -615,21 +641,21 @@ export default function LibraryView({
       } else if (e.key === 'x' || e.key === 'X') {
         e.preventDefault()
         requestMove('disliked')
-      } else if (e.key === 'r' || e.key === 'R') {
+      } else if (e.key === 's' || e.key === 'S') {
         e.preventDefault()
-        requestMove('review')
+        requestMove('sharing')
       } else if (e.key === 'u' || e.key === 'U') {
         e.preventDefault()
         requestMove('root')
-      } else if (e.key === 'Delete' && bucket !== 'deleted') {
+      } else if (e.key === 'Delete' && bucket !== 'disliked') {
         e.preventDefault()
-        requestDelete()
+        requestMove('disliked')
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
         setSelected(new Set(photos.map((p) => p.name)))
       }
     },
-    [photos, bursts, focused, viewer, confirm, exportOpen, exporting, resetOpen, busy, detecting, bucket, requestMove, requestDelete, runUndo, onToggleFullscreen],
+    [photos, bursts, focused, viewer, confirm, exportOpen, exporting, resetOpen, busy, detecting, bucket, requestMove, runUndo, onToggleFullscreen, revealInFinder],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -644,7 +670,7 @@ export default function LibraryView({
     try {
       const names = JSON.parse(e.dataTransfer.getData('application/x-sorta-photos')) as string[]
       if (!Array.isArray(names) || names.length === 0) return
-      if (names.length > 1 || to === 'deleted') setConfirm({ to, names })
+      if (names.length > 1) setConfirm({ to, names })
       else void doMove(names, to)
     } catch {
       /* ignore */
@@ -678,19 +704,10 @@ export default function LibraryView({
             <span className="bucket-count">{counts[b]}</span>
           </button>
         ))}
-        {bucket === 'review' && photos.length > 0 && (
-          <button
-            type="button"
-            className="btn btn--neutral bucket-review-btn"
-            onClick={() => onOpenReview(photos)}
-          >
-            Review Photos
-          </button>
-        )}
         {bucket === 'liked' && photos.length > 0 && (
           <button
             type="button"
-            className="btn btn--like bucket-review-btn"
+            className="btn btn--like bucket-sharing-btn"
             disabled={busy || exporting || detecting}
             onClick={() => {
               setExportPath((p) => p || '~/Desktop/sorta-liked-export')
@@ -700,10 +717,10 @@ export default function LibraryView({
             Export Liked
           </button>
         )}
-        {bucket === 'root' && (counts.liked > 0 || counts.posting > 0 || counts.review > 0 || counts.disliked > 0) && (
+        {bucket === 'root' && (counts.liked > 0 || counts.posting > 0 || counts.sharing > 0 || counts.disliked > 0) && (
           <button
             type="button"
-            className="btn btn--neutral bucket-review-btn"
+            className="btn btn--neutral bucket-sharing-btn"
             disabled={busy || detecting}
             onClick={() => setResetOpen(true)}
           >
@@ -744,6 +761,15 @@ export default function LibraryView({
                 Compare
               </button>
             )}
+            <button
+              type="button"
+              className="btn btn--neutral btn--small"
+              disabled={detecting || photos.length === 0}
+              title={`Export ${bucketLabel(bucket)} file names as JSON`}
+              onClick={() => void exportBucketFileList(bucket)}
+            >
+              Export JSON
+            </button>
             {bucket === 'liked' && photos.length > 0 && (
               <button
                 type="button"
@@ -757,17 +783,6 @@ export default function LibraryView({
                 Export
               </button>
             )}
-            {bucket !== 'deleted' && photos.length > 0 && (
-              <button
-                type="button"
-                className="btn btn--delete btn--small"
-                disabled={busy || detecting}
-                onClick={() => requestDelete()}
-                title="Move to Deleted (Delete)"
-              >
-                Delete
-              </button>
-            )}
           </div>
         </div>
 
@@ -779,9 +794,9 @@ export default function LibraryView({
                 Unclassified
               </button>
             )}
-            {bucket !== 'review' && (
-              <button type="button" className="btn btn--review btn--small" disabled={busy} onClick={() => requestMove('review')}>
-                Review
+            {bucket !== 'sharing' && (
+              <button type="button" className="btn btn--sharing btn--small" disabled={busy} onClick={() => requestMove('sharing')}>
+                Sharing
               </button>
             )}
             {bucket !== 'liked' && (
@@ -797,11 +812,6 @@ export default function LibraryView({
             {bucket !== 'disliked' && (
               <button type="button" className="btn btn--dislike btn--small" disabled={busy} onClick={() => requestMove('disliked')}>
                 Reject
-              </button>
-            )}
-            {bucket !== 'deleted' && (
-              <button type="button" className="btn btn--delete btn--small" disabled={busy} onClick={() => requestDelete()}>
-                Delete
               </button>
             )}
           </div>
@@ -977,9 +987,9 @@ export default function LibraryView({
                     Reject <kbd>X</kbd>
                   </button>
                 )}
-                {bucket !== 'review' && (
-                  <button type="button" className="btn btn--review" onClick={() => requestMove('review')}>
-                    Review <kbd>R</kbd>
+                {bucket !== 'sharing' && (
+                  <button type="button" className="btn btn--sharing" onClick={() => requestMove('sharing')}>
+                    Sharing <kbd>S</kbd>
                   </button>
                 )}
                 {bucket !== 'liked' && (
@@ -997,11 +1007,6 @@ export default function LibraryView({
                     Unclassified <kbd>U</kbd>
                   </button>
                 )}
-                {bucket !== 'deleted' && (
-                  <button type="button" className="btn btn--delete" onClick={() => requestDelete()}>
-                    Delete <kbd>Del</kbd>
-                  </button>
-                )}
                 <button
                   type="button"
                   className={`btn btn--neutral${showExif ? ' btn--exif-on' : ''}`}
@@ -1009,6 +1014,14 @@ export default function LibraryView({
                   title="EXIF (I)"
                 >
                   EXIF <kbd>I</kbd>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--neutral"
+                  onClick={revealInFinder}
+                  title="Show in Finder (O)"
+                >
+                  Finder <kbd>O</kbd>
                 </button>
                 <button type="button" className="btn btn--neutral" onClick={() => setViewer(null)}>
                   Close
@@ -1023,28 +1036,18 @@ export default function LibraryView({
         createPortal(
           <div className="confirm-modal" role="alertdialog" aria-modal="true">
             <div className="confirm-card">
-              <p>
-                {confirm.to === 'deleted'
-                  ? `Delete ${confirm.names.length} photo${confirm.names.length === 1 ? '' : 's'}?`
-                  : `Move ${confirm.names.length} photos to ${bucketLabel(confirm.to)}?`}
-              </p>
-              <p className="muted">
-                {confirm.to === 'deleted'
-                  ? 'Files (and matching .ARW sidecars) move to deleted/. Undo can restore them.'
-                  : 'This will physically move the files.'}
-              </p>
+              <p>{`Move ${confirm.names.length} photos to ${bucketLabel(confirm.to)}?`}</p>
+              <p className="muted">This will physically move the files.</p>
               <div className="actions">
                 <button type="button" className="btn btn--neutral" onClick={() => setConfirm(null)}>
                   Cancel
                 </button>
                 <button
                   type="button"
-                  className={confirm.to === 'deleted' ? 'btn btn--delete' : 'btn btn--like'}
+                  className="btn btn--like"
                   onClick={() => void doMove(confirm.names, confirm.to)}
                 >
-                  {confirm.to === 'deleted'
-                    ? `Delete ${confirm.names.length}`
-                    : `Move ${confirm.names.length} Photos`}
+                  {`Move ${confirm.names.length} Photos`}
                 </button>
               </div>
             </div>
@@ -1109,11 +1112,11 @@ export default function LibraryView({
             <div className="confirm-card export-card">
               <h3 className="export-title">Reset All to Unclassified</h3>
               <p className="muted">
-                Move every photo from Liked, Posting, Review, and Disliked back to Unclassified.
+                Move every photo from Liked, Posting, Sharing, and Disliked back to Unclassified.
                 This can be undone with Undo.
               </p>
               <p className="muted export-meta">
-                {(counts.liked + counts.posting + counts.review + counts.disliked).toLocaleString()} classified photos
+                {(counts.liked + counts.posting + counts.sharing + counts.disliked).toLocaleString()} classified photos
               </p>
               <div className="actions">
                 <button

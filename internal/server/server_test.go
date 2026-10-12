@@ -154,6 +154,35 @@ func TestServePhotoPathTraversal(t *testing.T) {
 	}
 }
 
+func TestRevealPhoto(t *testing.T) {
+	srv, dir := setup(t)
+	prev := server.RevealHook
+	var got string
+	server.RevealHook = func(path string) error {
+		got = path
+		return nil
+	}
+	t.Cleanup(func() { server.RevealHook = prev })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/photos/A.jpg/reveal?from=root", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+	want := filepath.Join(dir, "A.jpg")
+	if got != want {
+		t.Fatalf("revealed %q want %q", got, want)
+	}
+	var resp models.RevealResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Success || resp.Path != want {
+		t.Fatalf("resp %+v", resp)
+	}
+}
+
 func TestActionAndUndo(t *testing.T) {
 	srv, dir := setup(t)
 
@@ -211,7 +240,7 @@ func TestInvalidAction(t *testing.T) {
 
 func TestMissingPhotoAction(t *testing.T) {
 	srv, _ := setup(t)
-	body := bytes.NewBufferString(`{"action":"review"}`)
+	body := bytes.NewBufferString(`{"action":"sharing"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/photos/nope.jpg/action", body)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -250,18 +279,18 @@ func TestLibraryAndMove(t *testing.T) {
 		t.Fatalf("%+v", lib)
 	}
 
-	body = bytes.NewBufferString(`{"filename":"A.jpg","from":"liked","to":"review"}`)
+	body = bytes.NewBufferString(`{"filename":"A.jpg","from":"liked","to":"sharing"}`)
 	req = httptest.NewRequest(http.MethodPost, "/api/photos/move", body)
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("%s", rr.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(dir, "review", "A.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "sharing", "A.jpg")); err != nil {
 		t.Fatal(err)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/photos/review/A.jpg", nil)
+	req = httptest.NewRequest(http.MethodGet, "/photos/sharing/A.jpg", nil)
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

@@ -166,11 +166,10 @@ func (s *Server) handleDetectBursts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleExif(w http.ResponseWriter, r *http.Request) {
-	filename := r.PathValue("filename")
+func (s *Server) resolvePhotoPath(filename string, from models.Bucket) (string, error) {
 	var path string
 	var err error
-	if from := models.Bucket(r.URL.Query().Get("from")); from.LibraryBucket() {
+	if from.LibraryBucket() {
 		path, err = s.Store.ResolveInBucket(from, filename)
 	} else {
 		path, err = s.Store.ResolveInRoot(filename)
@@ -180,6 +179,12 @@ func (s *Server) handleExif(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	return path, err
+}
+
+func (s *Server) handleExif(w http.ResponseWriter, r *http.Request) {
+	filename := r.PathValue("filename")
+	path, err := s.resolvePhotoPath(filename, models.Bucket(r.URL.Query().Get("from")))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_FILENAME", "Invalid filename")
 		return
@@ -208,6 +213,31 @@ func (s *Server) handleExif(w http.ResponseWriter, r *http.Request) {
 		TakenAt:     meta.TakenAt,
 		HasGPS:      meta.HasGPS,
 	})
+}
+
+// RevealHook opens a path in the system file manager. Tests may replace it.
+var RevealHook = filesystem.RevealInFileManager
+
+func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
+	filename := r.PathValue("filename")
+	path, err := s.resolvePhotoPath(filename, models.Bucket(r.URL.Query().Get("from")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_FILENAME", "Invalid filename")
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "PHOTO_NOT_FOUND", "Photo not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "FILE_READ_FAILED", "Could not read photo")
+		return
+	}
+	if err := RevealHook(path); err != nil {
+		writeError(w, http.StatusInternalServerError, "REVEAL_FAILED", "Could not show photo in file manager")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.RevealResponse{Success: true, Path: path})
 }
 
 func (s *Server) serveImage(w http.ResponseWriter, r *http.Request, path, filename string) {
@@ -288,7 +318,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !req.Action.Valid() {
-		writeError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be liked, disliked, or review")
+		writeError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be liked, disliked, or sharing")
 		return
 	}
 
@@ -563,7 +593,7 @@ func (s *Server) handleMoveBulk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResetUnclassified(w http.ResponseWriter, r *http.Request) {
-	sources := []models.Bucket{models.BucketLiked, models.BucketPosting, models.BucketReview, models.BucketDisliked}
+	sources := []models.Bucket{models.BucketLiked, models.BucketPosting, models.BucketSharing, models.BucketDisliked}
 	var records []models.ActionRecord
 	moved, failed := 0, 0
 

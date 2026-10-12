@@ -17,7 +17,6 @@ import {
 } from './api'
 import CompareMode from './CompareMode'
 import LibraryView from './LibraryView'
-import ReviewMode from './ReviewMode'
 import ZoomableImage from './ZoomableImage'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useKeyboard } from './hooks/useKeyboard'
@@ -34,15 +33,14 @@ const emptyStats: Stats = {
   liked: 0,
   posting: 0,
   disliked: 0,
-  review: 0,
-  deleted: 0,
+  sharing: 0,
 }
 
 const emptySession: SessionStats = {
   reviewed: 0,
   liked: 0,
   disliked: 0,
-  review: 0,
+  sharing: 0,
   avg_decision_seconds: 0,
 }
 
@@ -65,7 +63,7 @@ function clampIndex(i: number, len: number) {
 
 export default function App() {
   const [topMode, setTopMode] = useState<TopMode>('cull')
-  const [subMode, setSubMode] = useState<'browse' | 'review' | 'compare'>('browse')
+  const [subMode, setSubMode] = useState<'browse' | 'compare'>('browse')
   const [photos, setPhotos] = useState<Photo[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [stats, setStats] = useState<Stats>(emptyStats)
@@ -78,7 +76,6 @@ export default function App() {
   const { fullscreen, escHolding, toggleFullscreen } = useFullscreen()
   const [showExif, setShowExif] = useState(false)
   const [exif, setExif] = useState<ExifMetadata | null>(null)
-  const [reviewQueue, setReviewQueue] = useState<Photo[]>([])
   const [comparePhotos, setComparePhotos] = useState<Photo[]>([])
   const [compareBucket, setCompareBucket] = useState<Bucket>('liked')
   const [libBucket, setLibBucket] = useState<Bucket>('liked')
@@ -153,9 +150,8 @@ export default function App() {
           if (
             sess.lastBucket === 'liked' ||
             sess.lastBucket === 'posting' ||
-            sess.lastBucket === 'review' ||
-            sess.lastBucket === 'disliked' ||
-            sess.lastBucket === 'deleted'
+            sess.lastBucket === 'sharing' ||
+            sess.lastBucket === 'disliked'
           ) {
             resumeBucket = sess.lastBucket
           }
@@ -353,9 +349,9 @@ export default function App() {
       } else if (e.key === 'd' || e.key === 'D' || e.key === 'x' || e.key === 'X') {
         e.preventDefault()
         void runAction('disliked')
-      } else if (e.key === 'r' || e.key === 'R') {
+      } else if (e.key === 's' || e.key === 'S') {
         e.preventDefault()
-        void runAction('review')
+        void runAction('sharing')
       }
     },
     [topMode, subMode, status, runAction, runUndo, toggleFullscreen, navigateCull],
@@ -383,9 +379,8 @@ export default function App() {
   const cullSections: { bucket: Bucket; label: string; count: number }[] = [
     { bucket: 'liked', label: 'Liked', count: stats.liked },
     { bucket: 'posting', label: 'Posting', count: stats.posting },
-    { bucket: 'review', label: 'Review', count: stats.review },
+    { bucket: 'sharing', label: 'Sharing', count: stats.sharing },
     { bucket: 'disliked', label: 'Disliked', count: stats.disliked },
-    { bucket: 'deleted', label: 'Deleted', count: stats.deleted },
   ]
 
   return (
@@ -412,7 +407,7 @@ export default function App() {
           <span>S:{sessionStats.reviewed}</span>
           <span>L:{sessionStats.liked}</span>
           <span>D:{sessionStats.disliked}</span>
-          <span>R:{sessionStats.review}</span>
+          <span>Sh:{sessionStats.sharing}</span>
           {sessionStats.avg_decision_seconds > 0 && (
             <span>~{sessionStats.avg_decision_seconds.toFixed(1)}s</span>
           )}
@@ -454,30 +449,10 @@ export default function App() {
               setLibPhoto(photo)
               void persistSession('library', photo, b)
             }}
-            onOpenReview={(q) => {
-              setReviewQueue(q)
-              setSubMode('review')
-            }}
             onOpenCompare={(ps, b) => {
               setComparePhotos(ps)
               setCompareBucket(b)
               setSubMode('compare')
-            }}
-          />
-        </div>
-      )}
-
-      {topMode === 'library' && subMode === 'review' && (
-        <div className="view-pane" key="library-review">
-          <ReviewMode
-            photos={reviewQueue}
-            fullscreen={fullscreen}
-            onToggleFullscreen={toggleFullscreen}
-            onExit={() => setSubMode('browse')}
-            onToast={showToast}
-            onStats={(s) => {
-              setStats(s)
-              void refreshSessionStats()
             }}
           />
         </div>
@@ -594,7 +569,7 @@ export default function App() {
                 </div>
                 <p className="filename">
                   Unclassified — {currentIndex + 1} / {photos.length} · {current.name}
-                  <span className="cull-nav-hint"> · ← → browse · L D R decide</span>
+                  <span className="cull-nav-hint"> · ← → browse · L D S decide</span>
                 </p>
               </>
             )}
@@ -608,8 +583,8 @@ export default function App() {
                     <button type="button" className="btn btn--dislike" disabled={busy} onClick={() => void runAction('disliked')}>
                       Dislike <kbd>D</kbd>/<kbd>X</kbd>
                     </button>
-                    <button type="button" className="btn btn--review" disabled={busy} onClick={() => void runAction('review')}>
-                      Review <kbd>R</kbd>
+                    <button type="button" className="btn btn--sharing" disabled={busy} onClick={() => void runAction('sharing')}>
+                      Sharing <kbd>S</kbd>
                     </button>
                     <button type="button" className="btn btn--like" disabled={busy} onClick={() => void runAction('liked')}>
                       Like <kbd>L</kbd>
@@ -629,9 +604,8 @@ export default function App() {
                 <div className="counts">
                   <span title="Liked">L:{stats.liked}</span>
                   <span title="Posting">P:{stats.posting}</span>
-                  <span title="Review">R:{stats.review}</span>
+                  <span title="Sharing">Sh:{stats.sharing}</span>
                   <span title="Disliked">D:{stats.disliked}</span>
-                  <span title="Deleted">Del:{stats.deleted}</span>
                   <span title="Unclassified">Left:{stats.remaining}</span>
                 </div>
               </div>

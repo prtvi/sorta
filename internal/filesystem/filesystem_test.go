@@ -18,7 +18,7 @@ func TestNewStoreAndEnsureDirs(t *testing.T) {
 	if err := store.EnsureClassificationDirs(); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"liked", "posting", "disliked", "review", "deleted"} {
+	for _, name := range []string{"liked", "posting", "disliked", "sharing"} {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || !info.IsDir() {
 			t.Fatalf("missing dir %s: %v", name, err)
@@ -26,7 +26,7 @@ func TestNewStoreAndEnsureDirs(t *testing.T) {
 	}
 }
 
-func TestMoveToDeletedTakesARW(t *testing.T) {
+func TestMoveToDislikedTakesARW(t *testing.T) {
 	dir := t.TempDir()
 	store, err := filesystem.NewStore(dir)
 	if err != nil {
@@ -39,15 +39,15 @@ func TestMoveToDeletedTakesARW(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "liked", "gone.ARW"), []byte("r"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rec, err := store.MoveBetweenBuckets("gone.jpg", models.BucketLiked, models.BucketDeleted)
+	rec, err := store.MoveBetweenBuckets("gone.jpg", models.BucketLiked, models.BucketDisliked)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "deleted", "gone.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "disliked", "gone.jpg")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "deleted", "gone.ARW")); err != nil {
-		t.Fatalf("ARW should move to deleted: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "disliked", "gone.ARW")); err != nil {
+		t.Fatalf("ARW should move to disliked: %v", err)
 	}
 	if _, err := store.UndoMove(*rec); err != nil {
 		t.Fatal(err)
@@ -118,11 +118,11 @@ func TestMoveBetweenBuckets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "liked", "a.jpg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rec, err := store.MoveBetweenBuckets("a.jpg", models.BucketLiked, models.BucketReview)
+	rec, err := store.MoveBetweenBuckets("a.jpg", models.BucketLiked, models.BucketSharing)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "review", "a.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "sharing", "a.jpg")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.UndoMove(*rec); err != nil {
@@ -218,7 +218,7 @@ func TestMultipleUndoOrder(t *testing.T) {
 	}{
 		{"A.jpg", models.ActionLiked},
 		{"B.jpg", models.ActionDisliked},
-		{"C.jpg", models.ActionReview},
+		{"C.jpg", models.ActionSharing},
 	}
 	var stack []models.ActionRecord
 	for _, a := range actions {
@@ -335,14 +335,14 @@ func TestMoveBetweenBucketsTakesARW(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec, err := store.MoveBetweenBuckets("shot.jpg", models.BucketLiked, models.BucketReview)
+	rec, err := store.MoveBetweenBuckets("shot.jpg", models.BucketLiked, models.BucketSharing)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "review", "shot.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "sharing", "shot.jpg")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "review", "shot.arw")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "sharing", "shot.arw")); err != nil {
 		t.Fatalf("lowercase .arw should move: %v", err)
 	}
 	if _, err := store.UndoMove(*rec); err != nil {

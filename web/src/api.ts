@@ -1,6 +1,6 @@
-export type PhotoAction = 'liked' | 'disliked' | 'review'
-export type Bucket = 'root' | 'liked' | 'posting' | 'review' | 'disliked' | 'deleted'
-export type AppMode = 'cull' | 'library' | 'review' | 'compare'
+export type PhotoAction = 'liked' | 'disliked' | 'sharing'
+export type Bucket = 'root' | 'liked' | 'posting' | 'sharing' | 'disliked'
+export type AppMode = 'cull' | 'library' | 'compare'
 export type ImageSize = 'view' | 'thumb'
 
 export interface Photo {
@@ -28,16 +28,15 @@ export interface Stats {
   root: number
   liked: number
   posting: number
+  sharing: number
   disliked: number
-  review: number
-  deleted: number
 }
 
 export interface SessionStats {
   reviewed: number
   liked: number
   disliked: number
-  review: number
+  sharing: number
   avg_decision_seconds: number
 }
 
@@ -269,6 +268,12 @@ export async function fetchExif(filename: string, from?: Bucket): Promise<ExifMe
   const q = from && from !== 'root' ? `?from=${encodeURIComponent(from)}` : ''
   const res = await fetch(`/api/photos/${encodeURIComponent(filename)}/exif${q}`)
   return parseJSON<ExifMetadata>(res)
+}
+
+export async function revealPhoto(filename: string, from?: Bucket): Promise<{ success: boolean; path?: string }> {
+  const q = from ? `?from=${encodeURIComponent(from)}` : ''
+  const res = await fetch(`/api/photos/${encodeURIComponent(filename)}/reveal${q}`, { method: 'POST' })
+  return parseJSON(res)
 }
 
 export async function fetchSession(): Promise<SessionState> {
