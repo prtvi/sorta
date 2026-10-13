@@ -30,7 +30,7 @@ func tinyJPEG() []byte {
 	}
 }
 
-func TestLikedBatches(t *testing.T) {
+func TestBucketBatches(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		if _, err := exec.LookPath("sips"); err != nil {
 			t.Skip("sips required")
@@ -54,7 +54,8 @@ func TestLikedBatches(t *testing.T) {
 	}
 
 	out := filepath.Join(t.TempDir(), "export-out")
-	res, err := export.Liked(store, export.Options{
+	res, err := export.Bucket(store, export.Options{
+		Bucket:      "liked",
 		Destination: out,
 		BatchSize:   30,
 		MaxBytes:    export.DefaultMaxBytes,
@@ -80,6 +81,48 @@ func TestLikedBatches(t *testing.T) {
 	}
 	if len(entries) != 30 {
 		t.Fatalf("batch-001 has %d files", len(entries))
+	}
+}
+
+func TestBucketSelectedNames(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		if _, err := exec.LookPath("sips"); err != nil {
+			t.Skip("sips required")
+		}
+	}
+
+	root := t.TempDir()
+	store, err := filesystem.NewStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnsureClassificationDirs(); err != nil {
+		t.Fatal(err)
+	}
+	liked := filepath.Join(root, "liked")
+	for i := 1; i <= 5; i++ {
+		name := filepath.Join(liked, "img"+itoa(i)+".jpg")
+		if err := os.WriteFile(name, tinyJPEG(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out := filepath.Join(t.TempDir(), "export-selected")
+	res, err := export.Bucket(store, export.Options{
+		Bucket:      "liked",
+		Destination: out,
+		BatchSize:   30,
+		MaxBytes:    export.DefaultMaxBytes,
+		Names:       []string{"img2.jpg", "img4.jpg"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Exported != 2 {
+		t.Fatalf("exported=%d", res.Exported)
+	}
+	if res.Batches != 1 {
+		t.Fatalf("batches=%d", res.Batches)
 	}
 }
 

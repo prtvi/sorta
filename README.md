@@ -84,8 +84,9 @@ cd web && npm install && npm run dev
 |-----|--------|
 | `←` `→` | Browse previous / next (no classify) |
 | `L` | Like |
+| `T` | Shortlist |
 | `D` / `X` | Dislike |
-| `R` | Review |
+| `S` | Sharing |
 | `Backspace` / `⌘Z` | Undo |
 | `F` | Fullscreen |
 | `I` | EXIF overlay (full view; loads on demand) |
@@ -131,7 +132,7 @@ Previews live under `.sorta/cache/` and are disposable. **Originals are never mo
 - `GET /api/stats` · `GET|PUT /api/session`
 - `POST /api/photos/{file}/action` · `POST /api/photos/move` · `POST /api/photos/move-bulk`
 - `POST /api/photos/reset-unclassified` — move Liked / Review / Disliked back to Unclassified
-- `POST /api/export/liked` — batch Liked into `batch-NNN/` folders (30 each), JPEG copies ≤15MB
+- `POST /api/export` — batch Liked / Shortlisted / Posting / Sharing into `batch-NNN/` folders (30 each), JPEG copies ≤15MB
 - `POST /api/undo` — bulk undo restores the whole batch
 
 ---

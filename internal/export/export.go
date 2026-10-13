@@ -19,11 +19,14 @@ const (
 	DefaultMaxBytes  = 15 * 1024 * 1024 // 15MB
 )
 
-// Options controls a liked-photos export.
+// Options controls a bucket photo export.
 type Options struct {
+	Bucket      models.Bucket
 	Destination string
 	BatchSize   int
 	MaxBytes    int64
+	// Names, when non-empty, limits the export to those filenames in the bucket.
+	Names []string
 }
 
 // Result summarizes an export run.
@@ -38,9 +41,22 @@ type Result struct {
 	Errors      []string `json:"errors,omitempty"`
 }
 
-// Liked exports liked photos into destination/batch-NNN/ folders as JPEGs ≤ maxBytes.
+// Exportable reports whether photos from b may be batch-exported as JPEGs.
+func Exportable(b models.Bucket) bool {
+	switch b {
+	case models.BucketLiked, models.BucketShortlisted, models.BucketPosting, models.BucketSharing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Bucket exports photos from a library bucket into destination/batch-NNN/ folders as JPEGs ≤ maxBytes.
 // Originals in the working tree are never modified.
-func Liked(store *filesystem.Store, opts Options) (*Result, error) {
+func Bucket(store *filesystem.Store, opts Options) (*Result, error) {
+	if !Exportable(opts.Bucket) {
+		return nil, fmt.Errorf("export not allowed for bucket %q", opts.Bucket)
+	}
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = DefaultBatchSize
 	}
@@ -55,11 +71,36 @@ func Liked(store *filesystem.Store, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("create destination: %w", err)
 	}
 
-	photos, err := store.ListLibraryBucket(models.BucketLiked)
+	photos, err := store.ListLibraryBucket(opts.Bucket)
 	if err != nil {
 		return nil, err
 	}
-	likedDir, err := store.BucketDir(models.BucketLiked)
+	if len(opts.Names) > 0 {
+		want := make(map[string]struct{}, len(opts.Names))
+		for _, name := range opts.Names {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			want[name] = struct{}{}
+		}
+		filtered := make([]models.Photo, 0, len(want))
+		for _, p := range photos {
+			if _, ok := want[p.Name]; ok {
+				filtered = append(filtered, p)
+				delete(want, p.Name)
+			}
+		}
+		if len(want) > 0 {
+			missing := make([]string, 0, len(want))
+			for name := range want {
+				missing = append(missing, name)
+			}
+			return nil, fmt.Errorf("photos not in %s: %s", opts.Bucket, strings.Join(missing, ", "))
+		}
+		photos = filtered
+	}
+	srcDir, err := store.BucketDir(opts.Bucket)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +131,7 @@ func Liked(store *filesystem.Store, opts Options) (*Result, error) {
 			end = len(photos)
 		}
 		for _, p := range photos[start:end] {
-			src := filepath.Join(likedDir, p.Name)
+			src := filepath.Join(srcDir, p.Name)
 			outName := exportJPEGName(p.Name)
 			outPath := filepath.Join(batchDir, outName)
 			if err := CompressToMaxBytes(src, outPath, opts.MaxBytes); err != nil {

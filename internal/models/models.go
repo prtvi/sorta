@@ -42,15 +42,16 @@ type Photo struct {
 type PhotoAction string
 
 const (
-	ActionLiked    PhotoAction = "liked"
-	ActionDisliked PhotoAction = "disliked"
-	ActionSharing  PhotoAction = "sharing"
+	ActionLiked       PhotoAction = "liked"
+	ActionShortlisted PhotoAction = "shortlisted"
+	ActionDisliked    PhotoAction = "disliked"
+	ActionSharing     PhotoAction = "sharing"
 )
 
 // Valid reports whether a is a known action.
 func (a PhotoAction) Valid() bool {
 	switch a {
-	case ActionLiked, ActionDisliked, ActionSharing:
+	case ActionLiked, ActionShortlisted, ActionDisliked, ActionSharing:
 		return true
 	default:
 		return false
@@ -142,6 +143,7 @@ type Stats struct {
 type SessionStats struct {
 	Reviewed           int     `json:"reviewed"`
 	Liked              int     `json:"liked"`
+	Shortlisted        int     `json:"shortlisted"`
 	Disliked           int     `json:"disliked"`
 	Sharing            int     `json:"sharing"`
 	AvgDecisionSeconds float64 `json:"avg_decision_seconds"`
@@ -230,15 +232,17 @@ type UndoResponse struct {
 	Stats   Stats       `json:"stats,omitempty"`
 }
 
-// ExportLikedRequest is POST /api/export/liked.
-type ExportLikedRequest struct {
-	Destination string `json:"destination"`
-	BatchSize   int    `json:"batch_size,omitempty"`
-	MaxBytes    int64  `json:"max_bytes,omitempty"`
+// ExportRequest is POST /api/export.
+type ExportRequest struct {
+	Bucket      Bucket   `json:"bucket"`
+	Destination string   `json:"destination"`
+	BatchSize   int      `json:"batch_size,omitempty"`
+	MaxBytes    int64    `json:"max_bytes,omitempty"`
+	Names       []string `json:"names,omitempty"`
 }
 
-// ExportLikedResponse is returned after exporting liked photos.
-type ExportLikedResponse struct {
+// ExportResponse is returned after exporting photos from a bucket.
+type ExportResponse struct {
 	Success     bool     `json:"success"`
 	Destination string   `json:"destination"`
 	BatchSize   int      `json:"batch_size"`

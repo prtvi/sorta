@@ -1,4 +1,4 @@
-export type PhotoAction = 'liked' | 'disliked' | 'sharing'
+export type PhotoAction = 'liked' | 'shortlisted' | 'disliked' | 'sharing'
 export type Bucket = 'root' | 'liked' | 'shortlisted' | 'posting' | 'sharing' | 'disliked'
 export type AppMode = 'cull' | 'library' | 'compare'
 export type ImageSize = 'view' | 'thumb'
@@ -41,6 +41,7 @@ export interface Stats {
 export interface SessionStats {
   reviewed: number
   liked: number
+  shortlisted: number
   disliked: number
   sharing: number
   avg_decision_seconds: number
@@ -224,7 +225,7 @@ export async function burstKeep(
   return parseJSON<BurstKeepResponse>(res)
 }
 
-export interface ExportLikedResponse {
+export interface ExportResponse {
   success: boolean
   destination: string
   batch_size: number
@@ -248,21 +249,23 @@ export async function resetToUnclassified(): Promise<ResetUnclassifiedResponse> 
   return parseJSON<ResetUnclassifiedResponse>(res)
 }
 
-export async function exportLiked(
+export async function exportBucket(
+  bucket: Bucket,
   destination: string,
-  batchSize = 30,
-  maxBytes = 15 * 1024 * 1024,
-): Promise<ExportLikedResponse> {
-  const res = await fetch('/api/export/liked', {
+  opts?: { batchSize?: number; maxBytes?: number; names?: string[] },
+): Promise<ExportResponse> {
+  const res = await fetch('/api/export', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      bucket,
       destination,
-      batch_size: batchSize,
-      max_bytes: maxBytes,
+      batch_size: opts?.batchSize ?? 30,
+      max_bytes: opts?.maxBytes ?? 15 * 1024 * 1024,
+      names: opts?.names,
     }),
   })
-  return parseJSON<ExportLikedResponse>(res)
+  return parseJSON<ExportResponse>(res)
 }
 
 export async function undoLast(): Promise<UndoResponse> {

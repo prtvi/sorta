@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   burstKeep,
   detectBursts,
-  exportLiked,
+  exportBucket,
   fetchExif,
   fetchLibrary,
   fetchStats,
@@ -35,13 +35,16 @@ type Props = {
   onSession: (bucket: Bucket, photo: string) => void
   fullscreen: boolean
   onToggleFullscreen: () => void
-  sidebarCollapsed: boolean
-  onSidebarCollapsedChange: (collapsed: boolean) => void
 }
 
 const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'shortlisted', 'posting', 'sharing', 'disliked']
+const EXPORTABLE_BUCKETS: Bucket[] = ['liked', 'shortlisted', 'posting', 'sharing']
 const EXPORT_BATCH_SIZE = 30
 const EXPORT_MAX_BYTES = 15 * 1024 * 1024
+
+function canExportPhotos(b: Bucket): boolean {
+  return EXPORTABLE_BUCKETS.includes(b)
+}
 
 function bucketLabel(b: Bucket) {
   if (b === 'root') return 'Unclassified'
@@ -85,19 +88,7 @@ function exifLines(meta: ExifMetadata | null): string[] {
   )
 }
 
-function chunkRows<T>(items: T[], cols: number): T[][] {
-  const n = Math.max(1, cols)
-  const rows: T[][] = []
-  for (let i = 0; i < items.length; i += n) {
-    rows.push(items.slice(i, i + n))
-  }
-  return rows
-}
-
-function countGridColumns(el: HTMLElement): number {
-  const cols = getComputedStyle(el).gridTemplateColumns.split(/\s+/).filter(Boolean).length
-  return cols > 0 ? cols : 1
-}
+const GRID_COLS = 8
 
 export default function LibraryView({
   initialBucket = 'root',
@@ -108,8 +99,6 @@ export default function LibraryView({
   onSession,
   fullscreen,
   onToggleFullscreen,
-  sidebarCollapsed,
-  onSidebarCollapsedChange,
 }: Props) {
   const [bucket, setBucket] = useState<Bucket>(
     LIBRARY_BUCKETS.includes(initialBucket) ? initialBucket : 'root',
@@ -136,17 +125,17 @@ export default function LibraryView({
   const [dragOver, setDragOver] = useState<Bucket | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const [exportPath, setExportPath] = useState('')
+  const [exportNames, setExportNames] = useState<string[] | null>(null)
   const [exporting, setExporting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
-  const [openMenu, setOpenMenu] = useState<'tools' | 'export' | null>(null)
-  const [gridCols, setGridCols] = useState(sidebarCollapsed ? 8 : 6)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [exportSubOpen, setExportSubOpen] = useState(false)
   const lastClickRef = useRef<number>(-1)
   const shownAt = useRef(Date.now())
   const cacheRef = useRef<Map<Bucket, LibraryResponse>>(new Map())
   const loadGen = useRef(0)
   const toolsMenuRef = useRef<HTMLDivElement>(null)
-  const exportMenuRef = useRef<HTMLDivElement>(null)
-  const gridMeasureRef = useRef<HTMLDivElement>(null)
+  const focusedTileRef = useRef<HTMLDivElement | null>(null)
 
   const applyCountsFromStats = useCallback(
     (fs: Stats) => {
@@ -253,6 +242,11 @@ export default function LibraryView({
     const p = photos[focused]
     if (p) onSession(bucket, p.name)
   }, [photos, focused, bucket, onSession])
+
+  useEffect(() => {
+    if (viewer) return
+    focusedTileRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [focused, photos, viewer])
 
   const selectedList = useMemo(
     () => photos.filter((p) => selected.has(p.name)),
@@ -365,22 +359,47 @@ export default function LibraryView({
     }
   }, [bucket, loadBucket, onToast, invalidateCache])
 
-  const runExportLiked = useCallback(async () => {
+  const exportPhotoCount = exportNames?.length ?? photos.length
+
+  const openPhotoExport = useCallback(
+    (names: string[] | null) => {
+      setExportNames(names)
+      const suffix = names ? 'selected' : bucket
+      setExportPath(`~/Desktop/sorta-${suffix}-export`)
+      setExportOpen(true)
+    },
+    [bucket],
+  )
+
+  const runExportPhotos = useCallback(async () => {
     const dest = exportPath.trim()
     if (!dest) {
       onToast('Enter a destination folder path', 'error')
       return
     }
+    if (!canExportPhotos(bucket)) {
+      onToast('Export is not available for this category', 'error')
+      return
+    }
+    if (exportNames && exportNames.length === 0) {
+      onToast('No photos selected to export', 'error')
+      return
+    }
     setExporting(true)
     try {
-      const res = await exportLiked(dest, EXPORT_BATCH_SIZE, EXPORT_MAX_BYTES)
+      const res = await exportBucket(bucket, dest, {
+        batchSize: EXPORT_BATCH_SIZE,
+        maxBytes: EXPORT_MAX_BYTES,
+        names: exportNames ?? undefined,
+      })
       setExportOpen(false)
+      setExportNames(null)
       if (res.failed > 0) {
         onToast(`Exported ${res.exported} · ${res.failed} failed · ${res.batches} batches`, 'error')
       } else {
         onToast(
           `Exported ${res.exported} photos into ${res.batches} batches at ${res.destination}`,
-          'liked',
+          toastToneForBucket(bucket),
         )
       }
     } catch (e) {
@@ -388,7 +407,31 @@ export default function LibraryView({
     } finally {
       setExporting(false)
     }
-  }, [exportPath, onToast])
+  }, [bucket, exportNames, exportPath, onToast])
+
+  const downloadFileList = useCallback(
+    (files: string[], b: Bucket, selected: boolean) => {
+      const category = b === 'root' ? 'unclassified' : b
+      const payload = {
+        category,
+        count: files.length,
+        files,
+        ...(selected ? { selection: true } : {}),
+      }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = selected ? `sorta-${category}-selected-files.json` : `sorta-${category}-files.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      onToast(
+        `Exported ${files.length} file name${files.length === 1 ? '' : 's'}${selected ? ' (selected)' : ''} from ${bucketLabel(b)}`,
+        toastToneForBucket(b),
+      )
+    },
+    [onToast],
+  )
 
   const exportBucketFileList = useCallback(
     async (b: Bucket) => {
@@ -398,26 +441,26 @@ export default function LibraryView({
           data = await fetchLibrary(b)
           cacheRef.current.set(b, data)
         }
-        const files = data.photos.map((p) => p.name)
-        const category = b === 'root' ? 'unclassified' : b
-        const payload = { category, count: files.length, files }
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `sorta-${category}-files.json`
-        a.click()
-        URL.revokeObjectURL(url)
-        onToast(
-          `Exported ${files.length} file name${files.length === 1 ? '' : 's'} from ${bucketLabel(b)}`,
-          toastToneForBucket(b),
+        downloadFileList(
+          data.photos.map((p) => p.name),
+          b,
+          false,
         )
       } catch (e) {
         onToast(e instanceof Error ? e.message : 'Could not export file list', 'error')
       }
     },
-    [onToast],
+    [downloadFileList, onToast],
   )
+
+  const exportSelectedFileList = useCallback(() => {
+    const files = [...selected]
+    if (files.length === 0) {
+      onToast('Select photos first', 'error')
+      return
+    }
+    downloadFileList(files, bucket, true)
+  }, [bucket, downloadFileList, onToast, selected])
 
   const runResetUnclassified = useCallback(async () => {
     setBusy(true)
@@ -513,9 +556,28 @@ export default function LibraryView({
     })
   }, [])
 
+  const gridItems = bursts.length > 0 ? singles : photos
+
+  const selectRowContaining = useCallback(
+    (name: string) => {
+      const idx = gridItems.findIndex((p) => p.name === name)
+      if (idx < 0) return
+      const start = Math.floor(idx / GRID_COLS) * GRID_COLS
+      toggleSelectNames(gridItems.slice(start, start + GRID_COLS).map((p) => p.name))
+    },
+    [gridItems, toggleSelectNames],
+  )
+
   const onTileClick = (index: number, e: React.MouseEvent) => {
     const photo = photos[index]
     if (!photo) return
+    if (e.altKey) {
+      e.preventDefault()
+      selectRowContaining(photo.name)
+      setFocused(index)
+      lastClickRef.current = index
+      return
+    }
     if (e.shiftKey && lastClickRef.current >= 0) {
       const a = Math.min(lastClickRef.current, index)
       const b = Math.max(lastClickRef.current, index)
@@ -545,29 +607,18 @@ export default function LibraryView({
   }, [viewer?.name])
 
   useEffect(() => {
-    if (!openMenu) return
+    if (!toolsOpen) {
+      setExportSubOpen(false)
+      return
+    }
     const onDocDown = (e: MouseEvent) => {
       const t = e.target as Node
-      if (toolsMenuRef.current?.contains(t) || exportMenuRef.current?.contains(t)) return
-      setOpenMenu(null)
+      if (toolsMenuRef.current?.contains(t)) return
+      setToolsOpen(false)
     }
     document.addEventListener('mousedown', onDocDown)
     return () => document.removeEventListener('mousedown', onDocDown)
-  }, [openMenu])
-
-  useEffect(() => {
-    if (sidebarCollapsed) {
-      setGridCols(8)
-      return
-    }
-    const el = gridMeasureRef.current
-    if (!el) return
-    const measure = () => setGridCols(countGridColumns(el))
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [sidebarCollapsed, bucket, photos.length, singles.length, bursts.length])
+  }, [toolsOpen])
 
   useEffect(() => {
     if (!viewer || !showExif) {
@@ -606,10 +657,10 @@ export default function LibraryView({
         }
         return
       }
-      if (openMenu) {
+      if (toolsOpen) {
         if (e.key === 'Escape') {
           e.preventDefault()
-          setOpenMenu(null)
+          setToolsOpen(false)
         }
         return
       }
@@ -720,14 +771,18 @@ export default function LibraryView({
         setFocused((f) => Math.max(0, f - 1))
       } else if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setFocused((f) => Math.min(photos.length - 1, f + gridCols))
+        setFocused((f) => Math.min(photos.length - 1, f + GRID_COLS))
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setFocused((f) => Math.max(0, f - gridCols))
+        setFocused((f) => Math.max(0, f - GRID_COLS))
       } else if (e.key === ' ') {
         e.preventDefault()
         const p = photos[focused]
         if (p) toggleSelect(p.name)
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault()
+        const p = photos[focused]
+        if (p) selectRowContaining(p.name)
       } else if (e.key === 'Enter') {
         e.preventDefault()
         const p = photos[focused]
@@ -764,7 +819,7 @@ export default function LibraryView({
         setSelected(new Set(photos.map((p) => p.name)))
       }
     },
-    [photos, bursts, focused, viewer, confirm, openMenu, exportOpen, exporting, resetOpen, busy, detecting, bucket, gridCols, requestMove, runUndo, onToggleFullscreen, revealInFinder],
+    [photos, bursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, selectRowContaining, requestMove, runUndo, onToggleFullscreen, revealInFinder],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -791,31 +846,17 @@ export default function LibraryView({
   const viewerBurstIndex = viewerBurst
     ? viewerBurst.photos.findIndex((p) => p.name === viewer!.name)
     : -1
-  const gridItems = bursts.length > 0 ? singles : photos
-  const gridRows = useMemo(() => chunkRows(gridItems, gridCols), [gridItems, gridCols])
-
   return (
-    <div className={`library${fullscreen ? ' library--fs' : ''}${sidebarCollapsed ? ' library--collapsed' : ''}`}>
-      {!sidebarCollapsed && (
-        <aside className="library-sidebar">
-          <div className="sidebar-top">
-            <span className="sidebar-top-label">Categories</span>
-            <button
-              type="button"
-              className="btn btn--neutral btn--small sidebar-toggle"
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
-              onClick={() => onSidebarCollapsedChange(true)}
-            >
-              ⟨
-            </button>
-          </div>
+    <div className={`library${fullscreen ? ' library--fs' : ''}`}>
+      <section className="library-main">
+        <div className="category-cards">
           {LIBRARY_BUCKETS.map((b) => (
             <button
               key={b}
               type="button"
-              className={`bucket-item bucket-item--${b}${bucket === b ? ' bucket-item--active' : ''}${dragOver === b ? ' bucket-item--drag' : ''}`}
+              className={`category-card category-card--${b}${bucket === b ? ' category-card--active' : ''}${dragOver === b ? ' category-card--drag' : ''}`}
               disabled={detecting}
+              title={bucketLabel(b)}
               onClick={() => void loadBucket(b)}
               onDragOver={(e) => {
                 e.preventDefault()
@@ -824,51 +865,17 @@ export default function LibraryView({
               onDragLeave={() => setDragOver(null)}
               onDrop={(e) => onDropBucket(e, b)}
             >
-              <span>{bucketLabel(b)}</span>
-              <span className="bucket-count">{counts[b]}</span>
+              <span className="category-card-label">{bucketShortLabel(b)}</span>
+              <span className="category-card-count">{counts[b]}</span>
             </button>
           ))}
-        </aside>
-      )}
-
-      <section className="library-main">
-        {sidebarCollapsed && (
-          <div className="category-cards">
-            {LIBRARY_BUCKETS.map((b) => (
-              <button
-                key={b}
-                type="button"
-                className={`category-card category-card--${b}${bucket === b ? ' category-card--active' : ''}${dragOver === b ? ' category-card--drag' : ''}`}
-                disabled={detecting}
-                title={bucketLabel(b)}
-                onClick={() => void loadBucket(b)}
-                onDragOver={(e) => {
-                  e.preventDefault()
-                  setDragOver(b)
-                }}
-                onDragLeave={() => setDragOver(null)}
-                onDrop={(e) => onDropBucket(e, b)}
-              >
-                <span className="category-card-label">{bucketShortLabel(b)}</span>
-                <span className="category-card-count">{counts[b]}</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              className="btn btn--neutral btn--small category-cards-expand"
-              title="Expand sidebar"
-              aria-label="Expand sidebar"
-              onClick={() => onSidebarCollapsedChange(false)}
-            >
-              ⟩
-            </button>
-          </div>
-        )}
+        </div>
         <div className="library-toolbar">
           <span className="muted">
             {bucketLabel(bucket)} · {photos.length}
             {bursts.length > 0 ? ` · ${bursts.length} burst${bursts.length === 1 ? '' : 's'}` : ''}
             {selected.size > 0 ? ` · ${selected.size} selected` : ''}
+            {photos.length > 0 ? ' · ⌥-click / R select row' : ''}
           </span>
           <div className="library-toolbar-actions">
             <button
@@ -897,15 +904,15 @@ export default function LibraryView({
             <div className="toolbar-menu" ref={toolsMenuRef}>
               <button
                 type="button"
-                className={`btn btn--neutral btn--small${openMenu === 'tools' ? ' btn--menu-open' : ''}`}
+                className={`btn btn--neutral btn--small${toolsOpen ? ' btn--menu-open' : ''}`}
                 disabled={detecting}
                 aria-haspopup="menu"
-                aria-expanded={openMenu === 'tools'}
-                onClick={() => setOpenMenu((m) => (m === 'tools' ? null : 'tools'))}
+                aria-expanded={toolsOpen}
+                onClick={() => setToolsOpen((o) => !o)}
               >
                 Tools ▾
               </button>
-              {openMenu === 'tools' && (
+              {toolsOpen && (
                 <div className="toolbar-menu-panel" role="menu">
                   <button
                     type="button"
@@ -913,12 +920,77 @@ export default function LibraryView({
                     className="toolbar-menu-item"
                     disabled={busy || detecting || photos.length === 0}
                     onClick={() => {
-                      setOpenMenu(null)
+                      setToolsOpen(false)
                       void runDetectBursts()
                     }}
                   >
                     {detecting ? 'Detecting bursts…' : 'Detect bursts'}
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={`toolbar-menu-item toolbar-menu-item--submenu${exportSubOpen ? ' toolbar-menu-item--open' : ''}`}
+                    aria-expanded={exportSubOpen}
+                    onClick={() => setExportSubOpen((o) => !o)}
+                  >
+                    Export {exportSubOpen ? '▾' : '▸'}
+                  </button>
+                  {exportSubOpen && (
+                    <div className="toolbar-submenu" role="group" aria-label="Export">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="toolbar-menu-item"
+                        disabled={photos.length === 0}
+                        onClick={() => {
+                          setToolsOpen(false)
+                          void exportBucketFileList(bucket)
+                        }}
+                      >
+                        File names (JSON) · {photos.length}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="toolbar-menu-item"
+                        disabled={selected.size === 0}
+                        onClick={() => {
+                          setToolsOpen(false)
+                          exportSelectedFileList()
+                        }}
+                      >
+                        Selected file names (JSON) · {selected.size}
+                      </button>
+                      {canExportPhotos(bucket) && (
+                        <>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="toolbar-menu-item"
+                            disabled={busy || exporting || photos.length === 0}
+                            onClick={() => {
+                              setToolsOpen(false)
+                              openPhotoExport(null)
+                            }}
+                          >
+                            All photos · {photos.length}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="toolbar-menu-item"
+                            disabled={busy || exporting || selected.size === 0}
+                            onClick={() => {
+                              setToolsOpen(false)
+                              openPhotoExport([...selected])
+                            }}
+                          >
+                            Selected photos… · {selected.size}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {bucket === 'root' && (
                     <button
                       type="button"
@@ -934,55 +1006,11 @@ export default function LibraryView({
                           counts.disliked === 0)
                       }
                       onClick={() => {
-                        setOpenMenu(null)
+                        setToolsOpen(false)
                         setResetOpen(true)
                       }}
                     >
                       Reset all to Unclassified
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="toolbar-menu" ref={exportMenuRef}>
-              <button
-                type="button"
-                className={`btn btn--neutral btn--small${openMenu === 'export' ? ' btn--menu-open' : ''}`}
-                disabled={detecting || exporting}
-                aria-haspopup="menu"
-                aria-expanded={openMenu === 'export'}
-                onClick={() => setOpenMenu((m) => (m === 'export' ? null : 'export'))}
-              >
-                Export ▾
-              </button>
-              {openMenu === 'export' && (
-                <div className="toolbar-menu-panel" role="menu">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="toolbar-menu-item"
-                    disabled={photos.length === 0}
-                    onClick={() => {
-                      setOpenMenu(null)
-                      void exportBucketFileList(bucket)
-                    }}
-                  >
-                    File names (JSON)
-                  </button>
-                  {bucket === 'liked' && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="toolbar-menu-item"
-                      disabled={busy || exporting || photos.length === 0}
-                      onClick={() => {
-                        setOpenMenu(null)
-                        setExportPath((p) => p || '~/Desktop/sorta-liked-export')
-                        setExportOpen(true)
-                      }}
-                    >
-                      Liked photos…
                     </button>
                   )}
                 </div>
@@ -1076,6 +1104,7 @@ export default function LibraryView({
                         return (
                           <div
                             key={p.name}
+                            ref={focused === i ? focusedTileRef : undefined}
                             className={`photo-tile photo-tile--burst${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
                             draggable
                             onDragStart={(e) => onDragStart(e, p.name)}
@@ -1120,57 +1149,33 @@ export default function LibraryView({
               <div className="singles-section">
                 {bursts.length > 0 && <h3 className="section-title">Singles</h3>}
                 <div
-                  ref={gridMeasureRef}
-                  className="photo-grid photo-grid--measure"
-                  aria-hidden
-                />
-                <div className="photo-grid-rows">
-                  {gridRows.map((row, rowIdx) => {
-                    const names = row.map((p) => p.name)
-                    const allSelected = names.length > 0 && names.every((name) => selected.has(name))
+                  className="photo-grid photo-grid--fixed"
+                  style={{ ['--grid-cols' as string]: String(GRID_COLS) }}
+                >
+                  {gridItems.map((p) => {
+                    const i = photos.findIndex((x) => x.name === p.name)
                     return (
-                      <div key={`row-${rowIdx}`} className="photo-grid-row">
-                        <button
-                          type="button"
-                          className={`row-select${allSelected ? ' row-select--on' : ''}`}
-                          disabled={detecting || row.length === 0}
-                          title={allSelected ? 'Deselect row' : 'Select row'}
-                          aria-label={allSelected ? `Deselect row ${rowIdx + 1}` : `Select row ${rowIdx + 1}`}
-                          onClick={() => toggleSelectNames(names)}
-                        >
-                          {allSelected ? 'Deselect' : 'Select row'}
-                        </button>
-                        <div
-                          className="photo-grid photo-grid--fixed"
-                          style={{ ['--grid-cols' as string]: String(gridCols) }}
-                        >
-                          {row.map((p) => {
-                            const i = photos.findIndex((x) => x.name === p.name)
-                            return (
-                              <div
-                                key={p.name}
-                                className={`photo-tile${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
-                                draggable
-                                onDragStart={(e) => onDragStart(e, p.name)}
-                                onClick={(e) => onTileClick(i, e)}
-                              >
-                                <div className="photo-tile-media">
-                                  <label className="photo-check" onClick={(e) => e.stopPropagation()}>
-                                    <input
-                                      type="checkbox"
-                                      checked={selected.has(p.name)}
-                                      onChange={() => toggleSelect(p.name)}
-                                    />
-                                  </label>
-                                  <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
-                                </div>
-                                <span className="photo-name" title={p.name}>
-                                  {p.name}
-                                </span>
-                              </div>
-                            )
-                          })}
+                      <div
+                        key={p.name}
+                        ref={focused === i ? focusedTileRef : undefined}
+                        className={`photo-tile${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                        draggable
+                        onDragStart={(e) => onDragStart(e, p.name)}
+                        onClick={(e) => onTileClick(i, e)}
+                      >
+                        <div className="photo-tile-media">
+                          <label className="photo-check" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selected.has(p.name)}
+                              onChange={() => toggleSelect(p.name)}
+                            />
+                          </label>
+                          <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
                         </div>
+                        <span className="photo-name" title={p.name}>
+                          {p.name}
+                        </span>
                       </div>
                     )
                   })}
@@ -1307,10 +1312,12 @@ export default function LibraryView({
         createPortal(
           <div className="confirm-modal" role="dialog" aria-modal="true">
             <div className="confirm-card export-card">
-              <h3 className="export-title">Export Liked</h3>
+              <h3 className="export-title">
+                Export {exportNames ? 'Selected' : bucketLabel(bucket)} Photos
+              </h3>
               <p className="muted">
                 Creates folders of {EXPORT_BATCH_SIZE} photos and compresses each copy to ≤15MB.
-                Originals stay in Liked.
+                Originals stay in {bucketLabel(bucket)}.
               </p>
               <label className="export-label" htmlFor="export-path">
                 Destination folder
@@ -1321,32 +1328,38 @@ export default function LibraryView({
                 type="text"
                 value={exportPath}
                 disabled={exporting}
-                placeholder="~/Desktop/sorta-liked-export"
+                placeholder={`~/Desktop/sorta-${exportNames ? 'selected' : bucket}-export`}
                 onChange={(e) => setExportPath(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !exporting) void runExportLiked()
+                  if (e.key === 'Enter' && !exporting) void runExportPhotos()
                 }}
                 autoFocus
               />
               <p className="muted export-meta">
-                {photos.length} photos → {Math.ceil(photos.length / EXPORT_BATCH_SIZE)} batches
+                {exportPhotoCount} photos → {Math.ceil(exportPhotoCount / EXPORT_BATCH_SIZE) || 0}{' '}
+                batches
               </p>
               <div className="actions">
                 <button
                   type="button"
                   className="btn btn--neutral"
                   disabled={exporting}
-                  onClick={() => setExportOpen(false)}
+                  onClick={() => {
+                    setExportOpen(false)
+                    setExportNames(null)
+                  }}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   className="btn btn--like"
-                  disabled={exporting || !exportPath.trim()}
-                  onClick={() => void runExportLiked()}
+                  disabled={exporting || !exportPath.trim() || exportPhotoCount === 0}
+                  onClick={() => void runExportPhotos()}
                 >
-                  {exporting ? 'Exporting…' : 'Export'}
+                  {exporting
+                    ? `Exporting ${exportPhotoCount}…`
+                    : `Export ${exportPhotoCount}`}
                 </button>
               </div>
             </div>

@@ -318,7 +318,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !req.Action.Valid() {
-		writeError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be liked, disliked, or sharing")
+		writeError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be liked, shortlisted, disliked, or sharing")
 		return
 	}
 
@@ -697,13 +697,13 @@ func (s *Server) handleUndo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleExportLiked(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Could not read request body")
 		return
 	}
-	var req models.ExportLikedRequest
+	var req models.ExportRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid JSON body")
 		return
@@ -712,18 +712,24 @@ func (s *Server) handleExportLiked(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_DESTINATION", "Destination path is required")
 		return
 	}
+	if !exportpkg.Exportable(req.Bucket) {
+		writeError(w, http.StatusBadRequest, "INVALID_BUCKET", "Export is only available for liked, shortlisted, posting, and sharing")
+		return
+	}
 
-	res, err := exportpkg.Liked(s.Store, exportpkg.Options{
+	res, err := exportpkg.Bucket(s.Store, exportpkg.Options{
+		Bucket:      req.Bucket,
 		Destination: req.Destination,
 		BatchSize:   req.BatchSize,
 		MaxBytes:    req.MaxBytes,
+		Names:       req.Names,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "EXPORT_FAILED", err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, models.ExportLikedResponse{
+	writeJSON(w, http.StatusOK, models.ExportResponse{
 		Success:     res.Failed == 0,
 		Destination: res.Destination,
 		BatchSize:   res.BatchSize,

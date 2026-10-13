@@ -23,7 +23,7 @@ import { useFullscreen } from './hooks/useFullscreen'
 import { useKeyboard } from './hooks/useKeyboard'
 import './App.css'
 
-type AnimDirection = 'left' | 'right' | 'down' | null
+type AnimDirection = 'left' | 'right' | 'down' | 'up' | null
 type AppStatus = 'loading' | 'ready' | 'error' | 'empty' | 'done'
 type TopMode = 'cull' | 'library'
 
@@ -41,6 +41,7 @@ const emptyStats: Stats = {
 const emptySession: SessionStats = {
   reviewed: 0,
   liked: 0,
+  shortlisted: 0,
   disliked: 0,
   sharing: 0,
   avg_decision_seconds: 0,
@@ -82,7 +83,6 @@ export default function App() {
   const [compareBucket, setCompareBucket] = useState<Bucket>('liked')
   const [libBucket, setLibBucket] = useState<Bucket>('liked')
   const [libPhoto, setLibPhoto] = useState<string | undefined>()
-  const [libSidebarCollapsed, setLibSidebarCollapsed] = useState(true)
 
   const busyRef = useRef(false)
   const photosRef = useRef(photos)
@@ -242,7 +242,13 @@ export default function App() {
       busyRef.current = true
       setBusy(true)
       const direction: AnimDirection =
-        action === 'liked' ? 'right' : action === 'disliked' ? 'left' : 'down'
+        action === 'liked'
+          ? 'right'
+          : action === 'disliked'
+            ? 'left'
+            : action === 'shortlisted'
+              ? 'up'
+              : 'down'
       setAnim(direction)
       const decisionMs = Date.now() - shownAt.current
 
@@ -355,6 +361,9 @@ export default function App() {
       if (e.key === 'l' || e.key === 'L') {
         e.preventDefault()
         void runAction('liked')
+      } else if (e.key === 't' || e.key === 'T') {
+        e.preventDefault()
+        void runAction('shortlisted')
       } else if (e.key === 'd' || e.key === 'D' || e.key === 'x' || e.key === 'X') {
         e.preventDefault()
         void runAction('disliked')
@@ -417,6 +426,7 @@ export default function App() {
           <div className="session-stats" title="Session statistics">
             <span>S:{sessionStats.reviewed}</span>
             <span>L:{sessionStats.liked}</span>
+            <span>T:{sessionStats.shortlisted}</span>
             <span>D:{sessionStats.disliked}</span>
             <span>Sh:{sessionStats.sharing}</span>
             {sessionStats.avg_decision_seconds > 0 && (
@@ -451,8 +461,6 @@ export default function App() {
             initialPhoto={libPhoto}
             fullscreen={fullscreen}
             onToggleFullscreen={toggleFullscreen}
-            sidebarCollapsed={libSidebarCollapsed}
-            onSidebarCollapsedChange={setLibSidebarCollapsed}
             onToast={showToast}
             onStats={(fs, sess) => {
               setStats(fs)
@@ -583,7 +591,7 @@ export default function App() {
                 </div>
                 <p className="filename">
                   Unclassified — {currentIndex + 1} / {photos.length} · {current.name}
-                  <span className="cull-nav-hint"> · ← → browse · L D S decide</span>
+                  <span className="cull-nav-hint"> · ← → browse · L T D S decide</span>
                 </p>
               </>
             )}
@@ -599,6 +607,14 @@ export default function App() {
                     </button>
                     <button type="button" className="btn btn--sharing" disabled={busy} onClick={() => void runAction('sharing')}>
                       Sharing <kbd>S</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--shortlisted"
+                      disabled={busy}
+                      onClick={() => void runAction('shortlisted')}
+                    >
+                      Shortlist <kbd>T</kbd>
                     </button>
                     <button type="button" className="btn btn--like" disabled={busy} onClick={() => void runAction('liked')}>
                       Like <kbd>L</kbd>

@@ -61,7 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/photos/move-bulk", s.handleMoveBulk)
 	mux.HandleFunc("POST /api/photos/reset-unclassified", s.handleResetUnclassified)
 	mux.HandleFunc("POST /api/undo", s.handleUndo)
-	mux.HandleFunc("POST /api/export/liked", s.handleExportLiked)
+	mux.HandleFunc("POST /api/export", s.handleExport)
 	mux.HandleFunc("GET /photos/{filename}", s.handleServePhoto)
 	mux.HandleFunc("GET /photos/{bucket}/{filename}", s.handleServeBucketPhoto)
 	return withLogging(mux)
@@ -101,6 +101,8 @@ func (s *Server) recordSessionMove(to models.Bucket, decisionMs int64) {
 	switch to {
 	case models.BucketLiked:
 		s.session.Liked++
+	case models.BucketShortlisted:
+		s.session.Shortlisted++
 	case models.BucketDisliked:
 		s.session.Disliked++
 	case models.BucketSharing:
