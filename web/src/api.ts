@@ -1,7 +1,12 @@
 export type PhotoAction = 'liked' | 'disliked' | 'sharing'
-export type Bucket = 'root' | 'liked' | 'posting' | 'sharing' | 'disliked'
+export type Bucket = 'root' | 'liked' | 'shortlisted' | 'posting' | 'sharing' | 'disliked'
 export type AppMode = 'cull' | 'library' | 'compare'
 export type ImageSize = 'view' | 'thumb'
+export type ToastTone = 'neutral' | 'error' | Bucket
+
+export function toastToneForBucket(bucket: Bucket): ToastTone {
+  return bucket
+}
 
 export interface Photo {
   name: string
@@ -27,6 +32,7 @@ export interface Stats {
   remaining: number
   root: number
   liked: number
+  shortlisted: number
   posting: number
   sharing: number
   disliked: number

@@ -20,6 +20,8 @@ import {
   type Photo,
   type SessionStats,
   type Stats,
+  type ToastTone,
+  toastToneForBucket,
 } from './api'
 import { useKeyboard } from './hooks/useKeyboard'
 import ZoomableImage from './ZoomableImage'
@@ -29,19 +31,38 @@ type Props = {
   initialPhoto?: string
   onOpenCompare: (photos: Photo[], bucket: Bucket) => void
   onStats: (fs: Stats, session: SessionStats) => void
-  onToast: (msg: string) => void
+  onToast: (msg: string, tone?: ToastTone) => void
   onSession: (bucket: Bucket, photo: string) => void
   fullscreen: boolean
   onToggleFullscreen: () => void
+  sidebarCollapsed: boolean
+  onSidebarCollapsedChange: (collapsed: boolean) => void
 }
 
-const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'posting', 'sharing', 'disliked']
+const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'shortlisted', 'posting', 'sharing', 'disliked']
 const EXPORT_BATCH_SIZE = 30
 const EXPORT_MAX_BYTES = 15 * 1024 * 1024
 
 function bucketLabel(b: Bucket) {
   if (b === 'root') return 'Unclassified'
   return b.charAt(0).toUpperCase() + b.slice(1)
+}
+
+function bucketShortLabel(b: Bucket) {
+  switch (b) {
+    case 'root':
+      return 'Unc'
+    case 'liked':
+      return 'Liked'
+    case 'shortlisted':
+      return 'Short'
+    case 'posting':
+      return 'Post'
+    case 'sharing':
+      return 'Share'
+    case 'disliked':
+      return 'Dis'
+  }
 }
 
 function burstContaining(groups: BurstGroup[], name: string): BurstGroup | undefined {
@@ -64,6 +85,20 @@ function exifLines(meta: ExifMetadata | null): string[] {
   )
 }
 
+function chunkRows<T>(items: T[], cols: number): T[][] {
+  const n = Math.max(1, cols)
+  const rows: T[][] = []
+  for (let i = 0; i < items.length; i += n) {
+    rows.push(items.slice(i, i + n))
+  }
+  return rows
+}
+
+function countGridColumns(el: HTMLElement): number {
+  const cols = getComputedStyle(el).gridTemplateColumns.split(/\s+/).filter(Boolean).length
+  return cols > 0 ? cols : 1
+}
+
 export default function LibraryView({
   initialBucket = 'root',
   initialPhoto,
@@ -73,6 +108,8 @@ export default function LibraryView({
   onSession,
   fullscreen,
   onToggleFullscreen,
+  sidebarCollapsed,
+  onSidebarCollapsedChange,
 }: Props) {
   const [bucket, setBucket] = useState<Bucket>(
     LIBRARY_BUCKETS.includes(initialBucket) ? initialBucket : 'root',
@@ -80,7 +117,14 @@ export default function LibraryView({
   const [photos, setPhotos] = useState<Photo[]>([])
   const [bursts, setBursts] = useState<BurstGroup[]>([])
   const [singles, setSingles] = useState<Photo[]>([])
-  const [counts, setCounts] = useState({ root: 0, liked: 0, posting: 0, sharing: 0, disliked: 0 })
+  const [counts, setCounts] = useState({
+    root: 0,
+    liked: 0,
+    shortlisted: 0,
+    posting: 0,
+    sharing: 0,
+    disliked: 0,
+  })
   const [focused, setFocused] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewer, setViewer] = useState<Photo | null>(null)
@@ -95,18 +139,21 @@ export default function LibraryView({
   const [exporting, setExporting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const [openMenu, setOpenMenu] = useState<'tools' | 'export' | null>(null)
+  const [gridCols, setGridCols] = useState(sidebarCollapsed ? 8 : 6)
   const lastClickRef = useRef<number>(-1)
   const shownAt = useRef(Date.now())
   const cacheRef = useRef<Map<Bucket, LibraryResponse>>(new Map())
   const loadGen = useRef(0)
   const toolsMenuRef = useRef<HTMLDivElement>(null)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const gridMeasureRef = useRef<HTMLDivElement>(null)
 
   const applyCountsFromStats = useCallback(
     (fs: Stats) => {
       setCounts({
         root: fs.root,
         liked: fs.liked,
+        shortlisted: fs.shortlisted,
         posting: fs.posting,
         sharing: fs.sharing,
         disliked: fs.disliked,
@@ -189,7 +236,7 @@ export default function LibraryView({
         prefetchOthers(b)
       } catch (e) {
         if (gen !== loadGen.current) return
-        onToast(e instanceof Error ? e.message : 'Could not load library')
+        onToast(e instanceof Error ? e.message : 'Could not load library', 'error')
       }
     },
     [applyLibraryData, onToast, onStats, prefetchOthers, refreshCounts],
@@ -197,7 +244,7 @@ export default function LibraryView({
 
   useEffect(() => {
     void loadBucket(bucket, initialPhoto).catch((e) =>
-      onToast(e instanceof Error ? e.message : 'Could not load library'),
+      onToast(e instanceof Error ? e.message : 'Could not load library', 'error'),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -273,15 +320,15 @@ export default function LibraryView({
           invalidateCache(bucket, to)
           onStats(res.stats, (await fetchStats()).session)
           if (res.failedCount > 0) {
-            onToast(`Moved ${res.movedCount}. ${res.failedCount} could not be moved.`)
+            onToast(`Moved ${res.movedCount}. ${res.failedCount} could not be moved.`, 'error')
           } else {
-            onToast(`Moved ${res.movedCount} photos`)
+            onToast(`Moved ${res.movedCount} photos to ${bucketLabel(to)}`, toastToneForBucket(to))
           }
         }
         await refreshCounts()
         shownAt.current = Date.now()
       } catch (e) {
-        onToast(e instanceof Error ? e.message : 'Move failed')
+        onToast(e instanceof Error ? e.message : 'Move failed', 'error')
       } finally {
         setBusy(false)
         setConfirm(null)
@@ -307,21 +354,21 @@ export default function LibraryView({
     try {
       const res = await undoLast()
       if (!res.success) {
-        onToast('Nothing to undo')
+        onToast('Nothing to undo', 'neutral')
         return
       }
       invalidateCache()
       await loadBucket(bucket, undefined, { force: true })
-      onToast(res.count && res.count > 1 ? `Undid ${res.count} photos` : 'Undone')
+      onToast(res.count && res.count > 1 ? `Undid ${res.count} photos` : 'Undone', 'neutral')
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Undo failed')
+      onToast(e instanceof Error ? e.message : 'Undo failed', 'error')
     }
   }, [bucket, loadBucket, onToast, invalidateCache])
 
   const runExportLiked = useCallback(async () => {
     const dest = exportPath.trim()
     if (!dest) {
-      onToast('Enter a destination folder path')
+      onToast('Enter a destination folder path', 'error')
       return
     }
     setExporting(true)
@@ -329,12 +376,15 @@ export default function LibraryView({
       const res = await exportLiked(dest, EXPORT_BATCH_SIZE, EXPORT_MAX_BYTES)
       setExportOpen(false)
       if (res.failed > 0) {
-        onToast(`Exported ${res.exported} · ${res.failed} failed · ${res.batches} batches`)
+        onToast(`Exported ${res.exported} · ${res.failed} failed · ${res.batches} batches`, 'error')
       } else {
-        onToast(`Exported ${res.exported} photos into ${res.batches} batches at ${res.destination}`)
+        onToast(
+          `Exported ${res.exported} photos into ${res.batches} batches at ${res.destination}`,
+          'liked',
+        )
       }
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Export failed')
+      onToast(e instanceof Error ? e.message : 'Export failed', 'error')
     } finally {
       setExporting(false)
     }
@@ -358,9 +408,12 @@ export default function LibraryView({
         a.download = `sorta-${category}-files.json`
         a.click()
         URL.revokeObjectURL(url)
-        onToast(`Exported ${files.length} file name${files.length === 1 ? '' : 's'} from ${bucketLabel(b)}`)
+        onToast(
+          `Exported ${files.length} file name${files.length === 1 ? '' : 's'} from ${bucketLabel(b)}`,
+          toastToneForBucket(b),
+        )
       } catch (e) {
-        onToast(e instanceof Error ? e.message : 'Could not export file list')
+        onToast(e instanceof Error ? e.message : 'Could not export file list', 'error')
       }
     },
     [onToast],
@@ -374,15 +427,15 @@ export default function LibraryView({
       invalidateCache()
       await loadBucket('root', undefined, { force: true })
       if (res.failedCount > 0) {
-        onToast(`Moved ${res.movedCount} · ${res.failedCount} failed`)
+        onToast(`Moved ${res.movedCount} · ${res.failedCount} failed`, 'error')
       } else if (res.movedCount === 0) {
-        onToast('Nothing to move — already all unclassified')
+        onToast('Nothing to move — already all unclassified', 'neutral')
       } else {
-        onToast(`Moved ${res.movedCount} photos to Unclassified`)
+        onToast(`Moved ${res.movedCount} photos to Unclassified`, 'root')
       }
       onStats(res.stats, (await fetchStats()).session)
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Reset failed')
+      onToast(e instanceof Error ? e.message : 'Reset failed', 'error')
     } finally {
       setBusy(false)
     }
@@ -400,9 +453,10 @@ export default function LibraryView({
         n === 0
           ? 'No bursts found (need ≥3 frames within 1s)'
           : `Found ${n} burst${n === 1 ? '' : 's'}`,
+        'neutral',
       )
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Burst detection failed')
+      onToast(e instanceof Error ? e.message : 'Burst detection failed', 'error')
     } finally {
       setDetecting(false)
     }
@@ -423,12 +477,12 @@ export default function LibraryView({
         setSingles((prev) => prev.filter((p) => !moved.has(p.name)))
         setSelected(new Set())
         invalidateCache()
-        onToast(`Kept ${keepName} · discarded ${Math.max(0, res.moved.length - 1)}`)
+        onToast(`Kept ${keepName} · discarded ${Math.max(0, res.moved.length - 1)}`, 'liked')
         await refreshCounts()
         const s = await fetchStats()
         onStats(s.filesystem, s.session)
       } catch (e) {
-        onToast(e instanceof Error ? e.message : 'Burst keep failed')
+        onToast(e instanceof Error ? e.message : 'Burst keep failed', 'error')
       } finally {
         setBusy(false)
       }
@@ -444,6 +498,20 @@ export default function LibraryView({
       return n
     })
   }
+
+  const toggleSelectNames = useCallback((names: string[]) => {
+    if (names.length === 0) return
+    setSelected((prev) => {
+      const n = new Set(prev)
+      const allSelected = names.every((name) => n.has(name))
+      if (allSelected) {
+        for (const name of names) n.delete(name)
+      } else {
+        for (const name of names) n.add(name)
+      }
+      return n
+    })
+  }, [])
 
   const onTileClick = (index: number, e: React.MouseEvent) => {
     const photo = photos[index]
@@ -488,6 +556,20 @@ export default function LibraryView({
   }, [openMenu])
 
   useEffect(() => {
+    if (sidebarCollapsed) {
+      setGridCols(8)
+      return
+    }
+    const el = gridMeasureRef.current
+    if (!el) return
+    const measure = () => setGridCols(countGridColumns(el))
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [sidebarCollapsed, bucket, photos.length, singles.length, bursts.length])
+
+  useEffect(() => {
     if (!viewer || !showExif) {
       if (!showExif) setExif(null)
       return
@@ -505,13 +587,13 @@ export default function LibraryView({
     }
   }, [viewer, showExif, bucket])
 
-  const gridCols = 6
-
   const revealInFinder = useCallback(() => {
     if (!viewer) return
     void revealPhoto(viewer.name, bucket)
-      .then(() => onToast('Shown in Finder'))
-      .catch((err: unknown) => onToast(err instanceof Error ? err.message : 'Could not show in Finder'))
+      .then(() => onToast('Shown in Finder', 'neutral'))
+      .catch((err: unknown) =>
+        onToast(err instanceof Error ? err.message : 'Could not show in Finder', 'error'),
+      )
   }, [viewer, bucket, onToast])
 
   useKeyboard(
@@ -593,6 +675,9 @@ export default function LibraryView({
         if (e.key === 'l' || e.key === 'L') {
           e.preventDefault()
           requestMove('liked')
+        } else if (e.key === 't' || e.key === 'T') {
+          e.preventDefault()
+          requestMove('shortlisted')
         } else if (e.key === 'p' || e.key === 'P') {
           e.preventDefault()
           requestMove('posting')
@@ -653,6 +738,9 @@ export default function LibraryView({
       } else if (e.key === 'l' || e.key === 'L') {
         e.preventDefault()
         requestMove('liked')
+      } else if (e.key === 't' || e.key === 'T') {
+        e.preventDefault()
+        requestMove('shortlisted')
       } else if (e.key === 'p' || e.key === 'P') {
         e.preventDefault()
         requestMove('posting')
@@ -676,7 +764,7 @@ export default function LibraryView({
         setSelected(new Set(photos.map((p) => p.name)))
       }
     },
-    [photos, bursts, focused, viewer, confirm, openMenu, exportOpen, exporting, resetOpen, busy, detecting, bucket, requestMove, runUndo, onToggleFullscreen, revealInFinder],
+    [photos, bursts, focused, viewer, confirm, openMenu, exportOpen, exporting, resetOpen, busy, detecting, bucket, gridCols, requestMove, runUndo, onToggleFullscreen, revealInFinder],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -703,31 +791,79 @@ export default function LibraryView({
   const viewerBurstIndex = viewerBurst
     ? viewerBurst.photos.findIndex((p) => p.name === viewer!.name)
     : -1
+  const gridItems = bursts.length > 0 ? singles : photos
+  const gridRows = useMemo(() => chunkRows(gridItems, gridCols), [gridItems, gridCols])
 
   return (
-    <div className={`library${fullscreen ? ' library--fs' : ''}`}>
-      <aside className="library-sidebar">
-        {LIBRARY_BUCKETS.map((b) => (
-          <button
-            key={b}
-            type="button"
-            className={`bucket-item${bucket === b ? ' bucket-item--active' : ''}${dragOver === b ? ' bucket-item--drag' : ''}`}
-            disabled={detecting}
-            onClick={() => void loadBucket(b)}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setDragOver(b)
-            }}
-            onDragLeave={() => setDragOver(null)}
-            onDrop={(e) => onDropBucket(e, b)}
-          >
-            <span>{bucketLabel(b)}</span>
-            <span className="bucket-count">{counts[b]}</span>
-          </button>
-        ))}
-      </aside>
+    <div className={`library${fullscreen ? ' library--fs' : ''}${sidebarCollapsed ? ' library--collapsed' : ''}`}>
+      {!sidebarCollapsed && (
+        <aside className="library-sidebar">
+          <div className="sidebar-top">
+            <span className="sidebar-top-label">Categories</span>
+            <button
+              type="button"
+              className="btn btn--neutral btn--small sidebar-toggle"
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              onClick={() => onSidebarCollapsedChange(true)}
+            >
+              ⟨
+            </button>
+          </div>
+          {LIBRARY_BUCKETS.map((b) => (
+            <button
+              key={b}
+              type="button"
+              className={`bucket-item bucket-item--${b}${bucket === b ? ' bucket-item--active' : ''}${dragOver === b ? ' bucket-item--drag' : ''}`}
+              disabled={detecting}
+              onClick={() => void loadBucket(b)}
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDragOver(b)
+              }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={(e) => onDropBucket(e, b)}
+            >
+              <span>{bucketLabel(b)}</span>
+              <span className="bucket-count">{counts[b]}</span>
+            </button>
+          ))}
+        </aside>
+      )}
 
       <section className="library-main">
+        {sidebarCollapsed && (
+          <div className="category-cards">
+            {LIBRARY_BUCKETS.map((b) => (
+              <button
+                key={b}
+                type="button"
+                className={`category-card category-card--${b}${bucket === b ? ' category-card--active' : ''}${dragOver === b ? ' category-card--drag' : ''}`}
+                disabled={detecting}
+                title={bucketLabel(b)}
+                onClick={() => void loadBucket(b)}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDragOver(b)
+                }}
+                onDragLeave={() => setDragOver(null)}
+                onDrop={(e) => onDropBucket(e, b)}
+              >
+                <span className="category-card-label">{bucketShortLabel(b)}</span>
+                <span className="category-card-count">{counts[b]}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className="btn btn--neutral btn--small category-cards-expand"
+              title="Expand sidebar"
+              aria-label="Expand sidebar"
+              onClick={() => onSidebarCollapsedChange(false)}
+            >
+              ⟩
+            </button>
+          </div>
+        )}
         <div className="library-toolbar">
           <span className="muted">
             {bucketLabel(bucket)} · {photos.length}
@@ -791,7 +927,11 @@ export default function LibraryView({
                       disabled={
                         busy ||
                         detecting ||
-                        (counts.liked === 0 && counts.posting === 0 && counts.sharing === 0 && counts.disliked === 0)
+                        (counts.liked === 0 &&
+                          counts.shortlisted === 0 &&
+                          counts.posting === 0 &&
+                          counts.sharing === 0 &&
+                          counts.disliked === 0)
                       }
                       onClick={() => {
                         setOpenMenu(null)
@@ -867,6 +1007,16 @@ export default function LibraryView({
             {bucket !== 'liked' && (
               <button type="button" className="btn btn--like btn--small" disabled={busy} onClick={() => requestMove('liked')}>
                 Like
+              </button>
+            )}
+            {bucket !== 'shortlisted' && (
+              <button
+                type="button"
+                className="btn btn--shortlisted btn--small"
+                disabled={busy}
+                onClick={() => requestMove('shortlisted')}
+              >
+                Shortlist
               </button>
             )}
             {bucket !== 'posting' && (
@@ -969,30 +1119,58 @@ export default function LibraryView({
             {(singles.length > 0 || bursts.length === 0) && (
               <div className="singles-section">
                 {bursts.length > 0 && <h3 className="section-title">Singles</h3>}
-                <div className="photo-grid">
-                  {(bursts.length > 0 ? singles : photos).map((p) => {
-                    const i = photos.findIndex((x) => x.name === p.name)
+                <div
+                  ref={gridMeasureRef}
+                  className="photo-grid photo-grid--measure"
+                  aria-hidden
+                />
+                <div className="photo-grid-rows">
+                  {gridRows.map((row, rowIdx) => {
+                    const names = row.map((p) => p.name)
+                    const allSelected = names.length > 0 && names.every((name) => selected.has(name))
                     return (
-                      <div
-                        key={p.name}
-                        className={`photo-tile${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
-                        draggable
-                        onDragStart={(e) => onDragStart(e, p.name)}
-                        onClick={(e) => onTileClick(i, e)}
-                      >
-                        <div className="photo-tile-media">
-                          <label className="photo-check" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={selected.has(p.name)}
-                              onChange={() => toggleSelect(p.name)}
-                            />
-                          </label>
-                          <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
+                      <div key={`row-${rowIdx}`} className="photo-grid-row">
+                        <button
+                          type="button"
+                          className={`row-select${allSelected ? ' row-select--on' : ''}`}
+                          disabled={detecting || row.length === 0}
+                          title={allSelected ? 'Deselect row' : 'Select row'}
+                          aria-label={allSelected ? `Deselect row ${rowIdx + 1}` : `Select row ${rowIdx + 1}`}
+                          onClick={() => toggleSelectNames(names)}
+                        >
+                          {allSelected ? 'Deselect' : 'Select row'}
+                        </button>
+                        <div
+                          className="photo-grid photo-grid--fixed"
+                          style={{ ['--grid-cols' as string]: String(gridCols) }}
+                        >
+                          {row.map((p) => {
+                            const i = photos.findIndex((x) => x.name === p.name)
+                            return (
+                              <div
+                                key={p.name}
+                                className={`photo-tile${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                                draggable
+                                onDragStart={(e) => onDragStart(e, p.name)}
+                                onClick={(e) => onTileClick(i, e)}
+                              >
+                                <div className="photo-tile-media">
+                                  <label className="photo-check" onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selected.has(p.name)}
+                                      onChange={() => toggleSelect(p.name)}
+                                    />
+                                  </label>
+                                  <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
+                                </div>
+                                <span className="photo-name" title={p.name}>
+                                  {p.name}
+                                </span>
+                              </div>
+                            )
+                          })}
                         </div>
-                        <span className="photo-name" title={p.name}>
-                          {p.name}
-                        </span>
                       </div>
                     )
                   })}
@@ -1060,6 +1238,11 @@ export default function LibraryView({
                 {bucket !== 'liked' && (
                   <button type="button" className="btn btn--like" onClick={() => requestMove('liked')}>
                     Like <kbd>L</kbd>
+                  </button>
+                )}
+                {bucket !== 'shortlisted' && (
+                  <button type="button" className="btn btn--shortlisted" onClick={() => requestMove('shortlisted')}>
+                    Shortlist <kbd>T</kbd>
                   </button>
                 )}
                 {bucket !== 'posting' && (
@@ -1177,11 +1360,18 @@ export default function LibraryView({
             <div className="confirm-card export-card">
               <h3 className="export-title">Reset All to Unclassified</h3>
               <p className="muted">
-                Move every photo from Liked, Posting, Sharing, and Disliked back to Unclassified.
+                Move every photo from Liked, Shortlisted, Posting, Sharing, and Disliked back to Unclassified.
                 This can be undone with Undo.
               </p>
               <p className="muted export-meta">
-                {(counts.liked + counts.posting + counts.sharing + counts.disliked).toLocaleString()} classified photos
+                {(
+                  counts.liked +
+                  counts.shortlisted +
+                  counts.posting +
+                  counts.sharing +
+                  counts.disliked
+                ).toLocaleString()}{' '}
+                classified photos
               </p>
               <div className="actions">
                 <button

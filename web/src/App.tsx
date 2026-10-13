@@ -14,6 +14,7 @@ import {
   type PhotoAction,
   type SessionStats,
   type Stats,
+  type ToastTone,
 } from './api'
 import CompareMode from './CompareMode'
 import LibraryView from './LibraryView'
@@ -31,6 +32,7 @@ const emptyStats: Stats = {
   remaining: 0,
   root: 0,
   liked: 0,
+  shortlisted: 0,
   posting: 0,
   disliked: 0,
   sharing: 0,
@@ -72,7 +74,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [anim, setAnim] = useState<AnimDirection>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null)
   const { fullscreen, escHolding, toggleFullscreen } = useFullscreen()
   const [showExif, setShowExif] = useState(false)
   const [exif, setExif] = useState<ExifMetadata | null>(null)
@@ -80,17 +82,23 @@ export default function App() {
   const [compareBucket, setCompareBucket] = useState<Bucket>('liked')
   const [libBucket, setLibBucket] = useState<Bucket>('liked')
   const [libPhoto, setLibPhoto] = useState<string | undefined>()
+  const [libSidebarCollapsed, setLibSidebarCollapsed] = useState(true)
 
   const busyRef = useRef(false)
   const photosRef = useRef(photos)
   const indexRef = useRef(currentIndex)
   const shownAt = useRef(Date.now())
+  const toastTimer = useRef<number | null>(null)
   photosRef.current = photos
   indexRef.current = currentIndex
 
-  const showToast = useCallback((message: string) => {
-    setToast(message)
-    window.setTimeout(() => setToast(null), 2800)
+  const showToast = useCallback((message: string, tone: ToastTone = 'neutral') => {
+    if (toastTimer.current != null) window.clearTimeout(toastTimer.current)
+    setToast({ message, tone })
+    toastTimer.current = window.setTimeout(() => {
+      setToast(null)
+      toastTimer.current = null
+    }, 2800)
   }, [])
 
   const persistSession = useCallback(async (mode: string, photo: string, bucket: string) => {
@@ -149,6 +157,7 @@ export default function App() {
           resumeMode = 'library'
           if (
             sess.lastBucket === 'liked' ||
+            sess.lastBucket === 'shortlisted' ||
             sess.lastBucket === 'posting' ||
             sess.lastBucket === 'sharing' ||
             sess.lastBucket === 'disliked'
@@ -253,7 +262,7 @@ export default function App() {
       } catch (e) {
         setAnim(null)
         const msg = e instanceof Error ? e.message : 'Could not move photo.'
-        showToast(msg)
+        showToast(msg, 'error')
       } finally {
         busyRef.current = false
         setBusy(false)
@@ -269,7 +278,7 @@ export default function App() {
     try {
       const res = await undoLast()
       if (!res.success) {
-        showToast('Nothing to undo')
+        showToast('Nothing to undo', 'neutral')
         return
       }
 
@@ -301,11 +310,11 @@ export default function App() {
           await refreshSessionStats()
         }
       } else {
-        showToast(res.count && res.count > 1 ? `Undid ${res.count}` : 'Undone')
+        showToast(res.count && res.count > 1 ? `Undid ${res.count}` : 'Undone', 'neutral')
       }
       await refreshSessionStats()
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Undo failed')
+      showToast(e instanceof Error ? e.message : 'Undo failed', 'error')
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -378,6 +387,7 @@ export default function App() {
 
   const cullSections: { bucket: Bucket; label: string; count: number }[] = [
     { bucket: 'liked', label: 'Liked', count: stats.liked },
+    { bucket: 'shortlisted', label: 'Shortlisted', count: stats.shortlisted },
     { bucket: 'posting', label: 'Posting', count: stats.posting },
     { bucket: 'sharing', label: 'Sharing', count: stats.sharing },
     { bucket: 'disliked', label: 'Disliked', count: stats.disliked },
@@ -403,15 +413,17 @@ export default function App() {
             Library
           </button>
         </nav>
-        <div className="session-stats" title="Session statistics">
-          <span>S:{sessionStats.reviewed}</span>
-          <span>L:{sessionStats.liked}</span>
-          <span>D:{sessionStats.disliked}</span>
-          <span>Sh:{sessionStats.sharing}</span>
-          {sessionStats.avg_decision_seconds > 0 && (
-            <span>~{sessionStats.avg_decision_seconds.toFixed(1)}s</span>
-          )}
-        </div>
+        {topMode !== 'library' && (
+          <div className="session-stats" title="Session statistics">
+            <span>S:{sessionStats.reviewed}</span>
+            <span>L:{sessionStats.liked}</span>
+            <span>D:{sessionStats.disliked}</span>
+            <span>Sh:{sessionStats.sharing}</span>
+            {sessionStats.avg_decision_seconds > 0 && (
+              <span>~{sessionStats.avg_decision_seconds.toFixed(1)}s</span>
+            )}
+          </div>
+        )}
         {topMode === 'cull' && (status === 'ready' || status === 'done') && (
           <div className="progress">
             {processed} / {stats.total}
@@ -439,6 +451,8 @@ export default function App() {
             initialPhoto={libPhoto}
             fullscreen={fullscreen}
             onToggleFullscreen={toggleFullscreen}
+            sidebarCollapsed={libSidebarCollapsed}
+            onSidebarCollapsedChange={setLibSidebarCollapsed}
             onToast={showToast}
             onStats={(fs, sess) => {
               setStats(fs)
@@ -603,6 +617,7 @@ export default function App() {
                 )}
                 <div className="counts">
                   <span title="Liked">L:{stats.liked}</span>
+                  <span title="Shortlisted">Sl:{stats.shortlisted}</span>
                   <span title="Posting">P:{stats.posting}</span>
                   <span title="Sharing">Sh:{stats.sharing}</span>
                   <span title="Disliked">D:{stats.disliked}</span>
@@ -615,8 +630,8 @@ export default function App() {
       )}
 
       {toast && (
-        <div className="toast" role="status">
-          {toast}
+        <div className={`toast toast--${toast.tone}`} role="status">
+          {toast.message}
         </div>
       )}
     </div>

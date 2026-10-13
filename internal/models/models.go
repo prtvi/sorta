@@ -4,17 +4,18 @@ package models
 type Bucket string
 
 const (
-	BucketRoot     Bucket = "root"
-	BucketLiked    Bucket = "liked"
-	BucketPosting  Bucket = "posting"
-	BucketSharing  Bucket = "sharing"
-	BucketDisliked Bucket = "disliked"
+	BucketRoot        Bucket = "root"
+	BucketLiked       Bucket = "liked"
+	BucketShortlisted Bucket = "shortlisted"
+	BucketPosting     Bucket = "posting"
+	BucketSharing     Bucket = "sharing"
+	BucketDisliked    Bucket = "disliked"
 )
 
 // Valid reports whether b is a known bucket.
 func (b Bucket) Valid() bool {
 	switch b {
-	case BucketRoot, BucketLiked, BucketPosting, BucketSharing, BucketDisliked:
+	case BucketRoot, BucketLiked, BucketShortlisted, BucketPosting, BucketSharing, BucketDisliked:
 		return true
 	default:
 		return false
@@ -127,13 +128,14 @@ type BurstGroup struct {
 
 // Stats reflects filesystem classification counts.
 type Stats struct {
-	Total     int `json:"total"`
-	Remaining int `json:"remaining"` // unclassified (root); kept for Cull UI
-	Root      int `json:"root"`
-	Liked     int `json:"liked"`
-	Posting   int `json:"posting"`
-	Sharing   int `json:"sharing"`
-	Disliked  int `json:"disliked"`
+	Total       int `json:"total"`
+	Remaining   int `json:"remaining"` // unclassified (root); kept for Cull UI
+	Root        int `json:"root"`
+	Liked       int `json:"liked"`
+	Shortlisted int `json:"shortlisted"`
+	Posting     int `json:"posting"`
+	Sharing     int `json:"sharing"`
+	Disliked    int `json:"disliked"`
 }
 
 // SessionStats tracks actions in the current process only.

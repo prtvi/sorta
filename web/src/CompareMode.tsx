@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { movePhoto, imageUrl, type Bucket, type Photo } from './api'
+import { movePhoto, imageUrl, toastToneForBucket, type Bucket, type Photo, type ToastTone } from './api'
 import { useKeyboard } from './hooks/useKeyboard'
 import ZoomableImage from './ZoomableImage'
 
@@ -8,7 +8,7 @@ type Props = {
   photos: Photo[]
   bucket: Bucket
   onExit: () => void
-  onToast: (msg: string) => void
+  onToast: (msg: string, tone?: ToastTone) => void
   onMoved: () => void
 }
 
@@ -37,11 +37,11 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
     if (!p) return
     try {
       await movePhoto(p.name, bucket, to)
-      onToast(`Moved ${p.name} to ${to}`)
+      onToast(`Moved ${p.name} to ${to === 'root' ? 'Unclassified' : to}`, toastToneForBucket(to))
       onMoved()
       onExit()
     } catch (e) {
-      onToast(e instanceof Error ? e.message : 'Move failed')
+      onToast(e instanceof Error ? e.message : 'Move failed', 'error')
     }
   }
 
@@ -70,6 +70,9 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
       <div className="actions">
         <button type="button" className="btn btn--like" onClick={() => void moveActive('liked')}>
           Like focused
+        </button>
+        <button type="button" className="btn btn--shortlisted" onClick={() => void moveActive('shortlisted')}>
+          Shortlist focused
         </button>
         <button type="button" className="btn btn--posting" onClick={() => void moveActive('posting')}>
           Posting focused

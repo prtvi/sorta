@@ -11,13 +11,14 @@ import (
 
 // Classification directories that must not be scanned for photos in the root.
 var skipDirs = map[string]bool{
-	"liked":    true,
-	"posting":  true,
-	"sharing":  true,
-	"disliked": true,
-	"review":   true, // legacy folder name; ignored if present
-	"deleted":  true, // legacy folder name; ignored if present
-	".sorta":   true,
+	"liked":       true,
+	"shortlisted": true,
+	"posting":     true,
+	"sharing":     true,
+	"disliked":    true,
+	"review":      true, // legacy folder name; ignored if present
+	"deleted":     true, // legacy folder name; ignored if present
+	".sorta":      true,
 }
 
 // supportedExts are case-insensitive image extensions for V1.
@@ -38,7 +39,7 @@ func IsSupportedImage(name string) bool {
 }
 
 // ScanRoot lists supported image files in the root of dir (non-recursive).
-// Files inside liked/, posting/, sharing/, disliked/, and .sorta/ are ignored.
+// Files inside liked/, shortlisted/, posting/, sharing/, disliked/, and .sorta/ are ignored.
 // Leftover review/ or deleted/ dirs (legacy) are also skipped if present.
 func ScanRoot(dir string) ([]models.Photo, error) {
 	return scanDir(dir, "/photos/")
