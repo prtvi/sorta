@@ -1106,6 +1106,7 @@ export default function LibraryView({
                             key={p.name}
                             ref={focused === i ? focusedTileRef : undefined}
                             className={`photo-tile photo-tile--burst${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                            title={p.name}
                             draggable
                             onDragStart={(e) => onDragStart(e, p.name)}
                             onClick={(e) => onTileClick(i, e)}
@@ -1132,9 +1133,6 @@ export default function LibraryView({
                                 Keep
                               </button>
                             </div>
-                            <span className="photo-name" title={p.name}>
-                              {p.name}
-                            </span>
                           </div>
                         )
                       })}
@@ -1159,6 +1157,7 @@ export default function LibraryView({
                         key={p.name}
                         ref={focused === i ? focusedTileRef : undefined}
                         className={`photo-tile${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                        title={p.name}
                         draggable
                         onDragStart={(e) => onDragStart(e, p.name)}
                         onClick={(e) => onTileClick(i, e)}
@@ -1173,9 +1172,6 @@ export default function LibraryView({
                           </label>
                           <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
                         </div>
-                        <span className="photo-name" title={p.name}>
-                          {p.name}
-                        </span>
                       </div>
                     )
                   })}
@@ -1202,8 +1198,13 @@ export default function LibraryView({
 
       {viewer &&
         createPortal(
-          <div className="library-viewer" role="dialog" aria-modal="true">
-            <div className="library-viewer-inner">
+          <div
+            className="library-viewer"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setViewer(null)}
+          >
+            <div className="library-viewer-inner" onClick={(e) => e.stopPropagation()}>
               <div className="library-viewer-stage">
                 <ZoomableImage
                   src={imageUrl(viewer.url, 'view')}
@@ -1287,8 +1288,13 @@ export default function LibraryView({
 
       {confirm &&
         createPortal(
-          <div className="confirm-modal" role="alertdialog" aria-modal="true">
-            <div className="confirm-card">
+          <div
+            className="confirm-modal"
+            role="alertdialog"
+            aria-modal="true"
+            onClick={() => setConfirm(null)}
+          >
+            <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
               <p>{`Move ${confirm.names.length} photos to ${bucketLabel(confirm.to)}?`}</p>
               <p className="muted">This will physically move the files.</p>
               <div className="actions">
@@ -1310,8 +1316,18 @@ export default function LibraryView({
 
       {exportOpen &&
         createPortal(
-          <div className="confirm-modal" role="dialog" aria-modal="true">
-            <div className="confirm-card export-card">
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => {
+              if (!exporting) {
+                setExportOpen(false)
+                setExportNames(null)
+              }
+            }}
+          >
+            <div className="confirm-card export-card" onClick={(e) => e.stopPropagation()}>
               <h3 className="export-title">
                 Export {exportNames ? 'Selected' : bucketLabel(bucket)} Photos
               </h3>
@@ -1369,8 +1385,15 @@ export default function LibraryView({
 
       {resetOpen &&
         createPortal(
-          <div className="confirm-modal" role="alertdialog" aria-modal="true">
-            <div className="confirm-card export-card">
+          <div
+            className="confirm-modal"
+            role="alertdialog"
+            aria-modal="true"
+            onClick={() => {
+              if (!busy) setResetOpen(false)
+            }}
+          >
+            <div className="confirm-card export-card" onClick={(e) => e.stopPropagation()}>
               <h3 className="export-title">Reset All to Unclassified</h3>
               <p className="muted">
                 Move every photo from Liked, Shortlisted, Posting, Sharing, and Disliked back to Unclassified.
