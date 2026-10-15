@@ -51,6 +51,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/session", s.handleGetSession)
 	mux.HandleFunc("PUT /api/session", s.handlePutSession)
+	mux.HandleFunc("GET /api/favorites", s.handleGetFavorites)
+	mux.HandleFunc("PUT /api/photos/{filename}/star", s.handlePutStar)
 	mux.HandleFunc("GET /api/library/{bucket}", s.handleLibrary)
 	mux.HandleFunc("POST /api/library/{bucket}/detect-bursts", s.handleDetectBursts)
 	mux.HandleFunc("GET /api/photos/{filename}/exif", s.handleExif)

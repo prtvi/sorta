@@ -12,6 +12,7 @@ import (
 	"github.com/prtvi/sorta/internal/burst"
 	"github.com/prtvi/sorta/internal/exifmeta"
 	exportpkg "github.com/prtvi/sorta/internal/export"
+	"github.com/prtvi/sorta/internal/favorites"
 	"github.com/prtvi/sorta/internal/filesystem"
 	"github.com/prtvi/sorta/internal/models"
 	"github.com/prtvi/sorta/internal/preview"
@@ -70,6 +71,44 @@ func (s *Server) handlePutSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) handleGetFavorites(w http.ResponseWriter, r *http.Request) {
+	st, _ := favorites.Load(s.Store.Root)
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) handlePutStar(w http.ResponseWriter, r *http.Request) {
+	filename, err := filesystem.SanitizeFilename(r.PathValue("filename"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_FILENAME", "Invalid filename")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Could not read request body")
+		return
+	}
+	var req models.StarRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid JSON body")
+		return
+	}
+	if req.Starred {
+		if _, err := s.Store.FindInLibrary(filename); err != nil {
+			writeError(w, http.StatusNotFound, "PHOTO_NOT_FOUND", "Photo not found")
+			return
+		}
+	}
+	if _, err := favorites.SetStarred(s.Store.Root, filename, req.Starred); err != nil {
+		writeError(w, http.StatusInternalServerError, "FAVORITES_SAVE_FAILED", "Could not save favorites")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.StarResponse{
+		Success:  true,
+		Filename: filename,
+		Starred:  req.Starred,
+	})
 }
 
 func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
@@ -722,6 +761,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		Destination: req.Destination,
 		BatchSize:   req.BatchSize,
 		MaxBytes:    req.MaxBytes,
+		Mode:        req.Mode,
 		Names:       req.Names,
 	})
 	if err != nil {
@@ -734,6 +774,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		Destination: res.Destination,
 		BatchSize:   res.BatchSize,
 		MaxBytes:    res.MaxBytes,
+		Mode:        res.Mode,
 		Exported:    res.Exported,
 		Failed:      res.Failed,
 		Batches:     res.Batches,

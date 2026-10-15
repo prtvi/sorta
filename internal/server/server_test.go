@@ -387,3 +387,64 @@ func TestInvalidLibraryBucket(t *testing.T) {
 		t.Fatalf("status %d", rr.Code)
 	}
 }
+
+func TestFavoritesStar(t *testing.T) {
+	srv, dir := setup(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/favorites", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d", rr.Code)
+	}
+	var empty models.FavoritesState
+	if err := json.NewDecoder(rr.Body).Decode(&empty); err != nil {
+		t.Fatal(err)
+	}
+	if len(empty.Names) != 0 {
+		t.Fatalf("%+v", empty)
+	}
+
+	body := bytes.NewBufferString(`{"starred":true}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/photos/A.jpg/star", body)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+	var star models.StarResponse
+	if err := json.NewDecoder(rr.Body).Decode(&star); err != nil {
+		t.Fatal(err)
+	}
+	if !star.Success || !star.Starred || star.Filename != "A.jpg" {
+		t.Fatalf("%+v", star)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/favorites", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	var fav models.FavoritesState
+	_ = json.NewDecoder(rr.Body).Decode(&fav)
+	if len(fav.Names) != 1 || fav.Names[0] != "A.jpg" {
+		t.Fatalf("%+v", fav)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".sorta", "favorites.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	body = bytes.NewBufferString(`{"starred":false}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/photos/A.jpg/star", body)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unstar %d", rr.Code)
+	}
+
+	body = bytes.NewBufferString(`{"starred":true}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/photos/missing.jpg/star", body)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing photo status %d", rr.Code)
+	}
+}

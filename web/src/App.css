@@ -742,6 +742,43 @@ kbd {
   flex-shrink: 0;
 }
 
+.library-toolbar-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.filter-star {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  white-space: nowrap;
+}
+
+.filter-star:hover:not(:disabled) {
+  border-color: #8a8a92;
+  color: var(--text);
+}
+
+.filter-star:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.filter-star--on {
+  border-color: rgba(240, 193, 74, 0.55);
+  color: #f0c14a;
+  background: rgba(240, 193, 74, 0.08);
+}
+
 .library-toolbar-actions {
   display: flex;
   gap: var(--space-2);
@@ -1058,6 +1095,50 @@ kbd {
   accent-color: var(--like);
 }
 
+.photo-star-badge {
+  position: absolute;
+  top: 0.3rem;
+  left: 0.3rem;
+  z-index: 2;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  background: rgba(0, 0, 0, 0.5);
+  color: #f0c14a;
+  font-size: 0.85rem;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.viewer-star-badge {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  z-index: 3;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(240, 193, 74, 0.45);
+  background: rgba(0, 0, 0, 0.55);
+  color: #f0c14a;
+  font-size: 1.15rem;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.btn--star-on {
+  border-color: rgba(240, 193, 74, 0.55);
+  color: #f0c14a;
+}
+
 .library-viewer,
 .confirm-modal {
   position: fixed;
@@ -1111,6 +1192,45 @@ kbd {
 
 .export-label {
   font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.export-mode {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.export-mode legend {
+  padding: 0;
+  margin-bottom: 0.15rem;
+}
+
+.export-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.export-mode-option input {
+  margin-top: 0.2rem;
+  accent-color: #c8c8d0;
+}
+
+.export-mode-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.export-mode-hint {
+  font-size: 0.75rem;
   color: var(--muted);
 }
 

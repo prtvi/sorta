@@ -4,7 +4,9 @@ import {
   burstKeep,
   detectBursts,
   exportBucket,
+  type ExportMode,
   fetchExif,
+  fetchFavorites,
   fetchLibrary,
   fetchStats,
   imageUrl,
@@ -12,6 +14,7 @@ import {
   movePhotosBulk,
   resetToUnclassified,
   revealPhoto,
+  setPhotoStarred,
   undoLast,
   type Bucket,
   type BurstGroup,
@@ -119,6 +122,9 @@ export default function LibraryView({
   const [viewer, setViewer] = useState<Photo | null>(null)
   const [showExif, setShowExif] = useState(false)
   const [exif, setExif] = useState<ExifMetadata | null>(null)
+  const [starred, setStarred] = useState<Set<string>>(() => new Set())
+  const [starBusy, setStarBusy] = useState(false)
+  const [starredOnly, setStarredOnly] = useState(false)
   const [busy, setBusy] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const [confirm, setConfirm] = useState<{ to: Bucket; names: string[] } | null>(null)
@@ -126,6 +132,7 @@ export default function LibraryView({
   const [exportOpen, setExportOpen] = useState(false)
   const [exportPath, setExportPath] = useState('')
   const [exportNames, setExportNames] = useState<string[] | null>(null)
+  const [exportMode, setExportMode] = useState<ExportMode>('compressed')
   const [exporting, setExporting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -163,16 +170,17 @@ export default function LibraryView({
       setBursts(data.bursts ?? [])
       setSingles(data.singles ?? data.photos)
       setSelected(new Set())
+      const list = starredOnly ? data.photos.filter((p) => starred.has(p.name)) : data.photos
       let idx = 0
       if (focusName) {
-        const i = data.photos.findIndex((p) => p.name === focusName)
+        const i = list.findIndex((p) => p.name === focusName)
         if (i >= 0) idx = i
       }
       setFocused(idx)
-      if (data.photos[idx]) onSession(b, data.photos[idx].name)
+      if (list[idx]) onSession(b, list[idx].name)
       if (data.stats) applyCountsFromStats(data.stats)
     },
-    [onSession, applyCountsFromStats],
+    [onSession, applyCountsFromStats, starredOnly, starred],
   )
 
   const invalidateCache = useCallback((...buckets: Bucket[]) => {
@@ -235,47 +243,131 @@ export default function LibraryView({
     void loadBucket(bucket, initialPhoto).catch((e) =>
       onToast(e instanceof Error ? e.message : 'Could not load library', 'error'),
     )
+    void fetchFavorites()
+      .then((fav) => setStarred(new Set(fav.names ?? [])))
+      .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const toggleStar = useCallback(
+    async (name: string) => {
+      if (!name || starBusy) return
+      const next = !starred.has(name)
+      setStarBusy(true)
+      setStarred((prev) => {
+        const n = new Set(prev)
+        if (next) n.add(name)
+        else n.delete(name)
+        return n
+      })
+      try {
+        await setPhotoStarred(name, next)
+      } catch (e) {
+        setStarred((prev) => {
+          const n = new Set(prev)
+          if (next) n.delete(name)
+          else n.add(name)
+          return n
+        })
+        onToast(e instanceof Error ? e.message : 'Could not update favourite', 'error')
+      } finally {
+        setStarBusy(false)
+      }
+    },
+    [starred, starBusy, onToast],
+  )
+
+  const visiblePhotos = useMemo(
+    () => (starredOnly ? photos.filter((p) => starred.has(p.name)) : photos),
+    [starredOnly, photos, starred],
+  )
+
+  const visibleBursts = useMemo(() => {
+    if (!starredOnly) return bursts
+    return bursts
+      .map((g) => {
+        const gp = g.photos.filter((p) => starred.has(p.name))
+        return { ...g, photos: gp, size: gp.length }
+      })
+      .filter((g) => g.photos.length > 0)
+  }, [starredOnly, bursts, starred])
+
+  const visibleSingles = useMemo(
+    () => (starredOnly ? singles.filter((p) => starred.has(p.name)) : singles),
+    [starredOnly, singles, starred],
+  )
+
+  const starredInBucket = useMemo(
+    () => photos.reduce((n, p) => n + (starred.has(p.name) ? 1 : 0), 0),
+    [photos, starred],
+  )
+
+  const pendingFocusName = useRef<string | null>(null)
+
   useEffect(() => {
-    const p = photos[focused]
+    if (pendingFocusName.current) {
+      const name = pendingFocusName.current
+      pendingFocusName.current = null
+      const i = visiblePhotos.findIndex((p) => p.name === name)
+      setFocused(i >= 0 ? i : 0)
+      return
+    }
+    setFocused((f) => {
+      if (visiblePhotos.length === 0) return 0
+      return Math.min(f, visiblePhotos.length - 1)
+    })
+  }, [visiblePhotos])
+
+  useEffect(() => {
+    if (!viewer || !starredOnly) return
+    if (starred.has(viewer.name)) return
+    const next = visiblePhotos[0] ?? null
+    setViewer(next)
+    if (next) shownAt.current = Date.now()
+  }, [viewer, starredOnly, starred, visiblePhotos])
+
+  useEffect(() => {
+    const p = visiblePhotos[focused]
     if (p) onSession(bucket, p.name)
-  }, [photos, focused, bucket, onSession])
+  }, [visiblePhotos, focused, bucket, onSession])
 
   useEffect(() => {
     if (viewer) return
     focusedTileRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [focused, photos, viewer])
+  }, [focused, visiblePhotos, viewer])
 
   const selectedList = useMemo(
-    () => photos.filter((p) => selected.has(p.name)),
-    [photos, selected],
+    () => visiblePhotos.filter((p) => selected.has(p.name)),
+    [visiblePhotos, selected],
   )
 
   const targets = useCallback(() => {
     if (selected.size > 0) return [...selected]
-    const p = photos[focused]
+    const p = visiblePhotos[focused]
     return p ? [p.name] : []
-  }, [selected, photos, focused])
+  }, [selected, visiblePhotos, focused])
 
-  const advanceViewerAfterRemove = useCallback((prev: Photo[], removed: Set<string>) => {
-    if (!viewer || !removed.has(viewer.name)) {
-      setFocused((f) => Math.min(f, Math.max(0, prev.length - removed.size - 1)))
-      return
-    }
-    const idx = prev.findIndex((p) => p.name === viewer.name)
-    const next = prev.filter((p) => !removed.has(p.name))
-    if (next.length === 0) {
-      setViewer(null)
-      setFocused(0)
-      return
-    }
-    const nextIdx = Math.min(Math.max(idx, 0), next.length - 1)
-    setFocused(nextIdx)
-    setViewer(next[nextIdx])
-    shownAt.current = Date.now()
-  }, [viewer])
+  const advanceViewerAfterRemove = useCallback(
+    (prev: Photo[], removed: Set<string>) => {
+      const nextAll = prev.filter((p) => !removed.has(p.name))
+      const next = starredOnly ? nextAll.filter((p) => starred.has(p.name)) : nextAll
+      if (!viewer || !removed.has(viewer.name)) {
+        setFocused((f) => Math.min(f, Math.max(0, next.length - 1)))
+        return
+      }
+      const idx = next.findIndex((p) => p.name === viewer.name)
+      if (next.length === 0) {
+        setViewer(null)
+        setFocused(0)
+        return
+      }
+      const nextIdx = idx >= 0 ? idx : Math.min(Math.max(prev.findIndex((p) => p.name === viewer.name), 0), next.length - 1)
+      setFocused(nextIdx)
+      setViewer(next[nextIdx])
+      shownAt.current = Date.now()
+    },
+    [viewer, starredOnly, starred],
+  )
 
   const doMove = useCallback(
     async (names: string[], to: Bucket) => {
@@ -364,6 +456,7 @@ export default function LibraryView({
   const openPhotoExport = useCallback(
     (names: string[] | null) => {
       setExportNames(names)
+      setExportMode('compressed')
       const suffix = names ? 'selected' : bucket
       setExportPath(`~/Desktop/sorta-${suffix}-export`)
       setExportOpen(true)
@@ -389,7 +482,8 @@ export default function LibraryView({
     try {
       const res = await exportBucket(bucket, dest, {
         batchSize: EXPORT_BATCH_SIZE,
-        maxBytes: EXPORT_MAX_BYTES,
+        maxBytes: exportMode === 'compressed' ? EXPORT_MAX_BYTES : undefined,
+        mode: exportMode,
         names: exportNames ?? undefined,
       })
       setExportOpen(false)
@@ -397,8 +491,10 @@ export default function LibraryView({
       if (res.failed > 0) {
         onToast(`Exported ${res.exported} · ${res.failed} failed · ${res.batches} batches`, 'error')
       } else {
+        const quality =
+          exportMode === 'original' ? 'as originals' : 'compressed to ≤15MB'
         onToast(
-          `Exported ${res.exported} photos into ${res.batches} batches at ${res.destination}`,
+          `Exported ${res.exported} photos ${quality} into ${res.batches} batches at ${res.destination}`,
           toastToneForBucket(bucket),
         )
       }
@@ -407,7 +503,7 @@ export default function LibraryView({
     } finally {
       setExporting(false)
     }
-  }, [bucket, exportNames, exportPath, onToast])
+  }, [bucket, exportMode, exportNames, exportPath, onToast])
 
   const downloadFileList = useCallback(
     (files: string[], b: Bucket, selected: boolean) => {
@@ -556,7 +652,7 @@ export default function LibraryView({
     })
   }, [])
 
-  const gridItems = bursts.length > 0 ? singles : photos
+  const gridItems = visibleBursts.length > 0 ? visibleSingles : visiblePhotos
 
   const selectRowContaining = useCallback(
     (name: string) => {
@@ -569,7 +665,7 @@ export default function LibraryView({
   )
 
   const onTileClick = (index: number, e: React.MouseEvent) => {
-    const photo = photos[index]
+    const photo = visiblePhotos[index]
     if (!photo) return
     if (e.altKey) {
       e.preventDefault()
@@ -583,7 +679,10 @@ export default function LibraryView({
       const b = Math.max(lastClickRef.current, index)
       setSelected((prev) => {
         const n = new Set(prev)
-        for (let i = a; i <= b; i++) n.add(photos[i].name)
+        for (let i = a; i <= b; i++) {
+          const p = visiblePhotos[i]
+          if (p) n.add(p.name)
+        }
         return n
       })
       setFocused(index)
@@ -689,6 +788,11 @@ export default function LibraryView({
           revealInFinder()
           return
         }
+        if (e.key === '*') {
+          e.preventDefault()
+          void toggleStar(viewer.name)
+          return
+        }
         if (e.key === 'Escape') {
           e.preventDefault()
           setViewer(null)
@@ -702,23 +806,23 @@ export default function LibraryView({
         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
           e.preventDefault()
           const delta = e.key === 'ArrowRight' ? 1 : -1
-          const burst = burstContaining(bursts, viewer.name)
+          const burst = burstContaining(visibleBursts, viewer.name)
           if (burst) {
             const bi = burst.photos.findIndex((p) => p.name === viewer.name)
             const nextBi = bi + delta
             if (nextBi < 0 || nextBi >= burst.photos.length) return
             const nextPhoto = burst.photos[nextBi]
-            const gi = photos.findIndex((p) => p.name === nextPhoto.name)
+            const gi = visiblePhotos.findIndex((p) => p.name === nextPhoto.name)
             if (gi < 0) return
             setFocused(gi)
-            setViewer(photos[gi])
+            setViewer(visiblePhotos[gi])
             shownAt.current = Date.now()
             return
           }
           const next = focused + delta
-          if (next >= 0 && next < photos.length) {
+          if (next >= 0 && next < visiblePhotos.length) {
             setFocused(next)
-            setViewer(photos[next])
+            setViewer(visiblePhotos[next])
             shownAt.current = Date.now()
           }
           return
@@ -761,31 +865,31 @@ export default function LibraryView({
         void runUndo()
         return
       }
-      if (photos.length === 0) return
+      if (visiblePhotos.length === 0) return
 
       if (e.key === 'ArrowRight') {
         e.preventDefault()
-        setFocused((f) => Math.min(photos.length - 1, f + 1))
+        setFocused((f) => Math.min(visiblePhotos.length - 1, f + 1))
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         setFocused((f) => Math.max(0, f - 1))
       } else if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setFocused((f) => Math.min(photos.length - 1, f + GRID_COLS))
+        setFocused((f) => Math.min(visiblePhotos.length - 1, f + GRID_COLS))
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         setFocused((f) => Math.max(0, f - GRID_COLS))
       } else if (e.key === ' ') {
         e.preventDefault()
-        const p = photos[focused]
+        const p = visiblePhotos[focused]
         if (p) toggleSelect(p.name)
       } else if (e.key === 'r' || e.key === 'R') {
         e.preventDefault()
-        const p = photos[focused]
+        const p = visiblePhotos[focused]
         if (p) selectRowContaining(p.name)
       } else if (e.key === 'Enter') {
         e.preventDefault()
-        const p = photos[focused]
+        const p = visiblePhotos[focused]
         if (p) {
           setViewer(p)
           shownAt.current = Date.now()
@@ -816,10 +920,10 @@ export default function LibraryView({
         requestMove('disliked')
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
-        setSelected(new Set(photos.map((p) => p.name)))
+        setSelected(new Set(visiblePhotos.map((p) => p.name)))
       }
     },
-    [photos, bursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, selectRowContaining, requestMove, runUndo, onToggleFullscreen, revealInFinder],
+    [visiblePhotos, visibleBursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, selectRowContaining, requestMove, runUndo, onToggleFullscreen, revealInFinder, toggleStar],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -842,7 +946,7 @@ export default function LibraryView({
   }
 
   const compareReady = selectedList.length >= 2 && selectedList.length <= 4
-  const viewerBurst = viewer ? burstContaining(bursts, viewer.name) : undefined
+  const viewerBurst = viewer ? burstContaining(visibleBursts, viewer.name) : undefined
   const viewerBurstIndex = viewerBurst
     ? viewerBurst.photos.findIndex((p) => p.name === viewer!.name)
     : -1
@@ -871,18 +975,43 @@ export default function LibraryView({
           ))}
         </div>
         <div className="library-toolbar">
-          <span className="muted">
-            {bucketLabel(bucket)} · {photos.length}
-            {bursts.length > 0 ? ` · ${bursts.length} burst${bursts.length === 1 ? '' : 's'}` : ''}
-            {selected.size > 0 ? ` · ${selected.size} selected` : ''}
-            {photos.length > 0 ? ' · ⌥-click / R select row' : ''}
-          </span>
+          <div className="library-toolbar-meta">
+            <span className="muted">
+              {bucketLabel(bucket)} ·{' '}
+              {starredOnly ? `${visiblePhotos.length} of ${photos.length}` : photos.length}
+              {visibleBursts.length > 0
+                ? ` · ${visibleBursts.length} burst${visibleBursts.length === 1 ? '' : 's'}`
+                : ''}
+              {selected.size > 0 ? ` · ${selected.size} selected` : ''}
+              {visiblePhotos.length > 0 ? ' · ⌥-click / R select row' : ''}
+            </span>
+            <button
+              type="button"
+              className={`filter-star${starredOnly ? ' filter-star--on' : ''}`}
+              aria-pressed={starredOnly}
+              disabled={detecting || (photos.length > 0 && starredInBucket === 0 && !starredOnly)}
+              title={
+                starredOnly
+                  ? 'Show all photos'
+                  : starredInBucket === 0
+                    ? 'No starred photos in this bucket'
+                    : 'Show starred only'
+              }
+              onClick={() => {
+                pendingFocusName.current = visiblePhotos[focused]?.name ?? null
+                setStarredOnly((v) => !v)
+              }}
+            >
+              {starredOnly ? '★ Starred' : '☆ Starred'}
+              {starredInBucket > 0 ? ` · ${starredInBucket}` : ''}
+            </button>
+          </div>
           <div className="library-toolbar-actions">
             <button
               type="button"
               className="btn btn--neutral btn--small"
-              disabled={photos.length === 0 || detecting}
-              onClick={() => setSelected(new Set(photos.map((p) => p.name)))}
+              disabled={visiblePhotos.length === 0 || detecting}
+              onClick={() => setSelected(new Set(visiblePhotos.map((p) => p.name)))}
             >
               Select All
             </button>
@@ -1065,12 +1194,17 @@ export default function LibraryView({
             <p>No photos here.</p>
             <p className="muted">Photos you move to this bucket will appear here.</p>
           </div>
+        ) : visiblePhotos.length === 0 ? (
+          <div className="state">
+            <p>No starred photos here.</p>
+            <p className="muted">Star photos in the open viewer, or turn off the starred filter.</p>
+          </div>
         ) : (
           <div className="library-scroll">
-            {bursts.length > 0 && (
+            {visibleBursts.length > 0 && (
               <div className="burst-groups">
                 <h3 className="section-title">Bursts</h3>
-                {bursts.map((g) => {
+                {visibleBursts.map((g) => {
                   const allSelected = g.photos.length > 0 && g.photos.every((p) => selected.has(p.name))
                   return (
                   <div key={g.id} className="burst-group">
@@ -1100,7 +1234,7 @@ export default function LibraryView({
                     </div>
                     <div className="burst-group-strip">
                       {g.photos.map((p) => {
-                        const i = photos.findIndex((x) => x.name === p.name)
+                        const i = visiblePhotos.findIndex((x) => x.name === p.name)
                         return (
                           <div
                             key={p.name}
@@ -1120,6 +1254,11 @@ export default function LibraryView({
                                 />
                               </label>
                               <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
+                              {starred.has(p.name) && (
+                                <span className="photo-star-badge" title="Favourited" aria-label="Favourited">
+                                  ★
+                                </span>
+                              )}
                               <button
                                 type="button"
                                 className="burst-keep-one"
@@ -1143,15 +1282,15 @@ export default function LibraryView({
               </div>
             )}
 
-            {(singles.length > 0 || bursts.length === 0) && (
+            {(visibleSingles.length > 0 || visibleBursts.length === 0) && (
               <div className="singles-section">
-                {bursts.length > 0 && <h3 className="section-title">Singles</h3>}
+                {visibleBursts.length > 0 && <h3 className="section-title">Singles</h3>}
                 <div
                   className="photo-grid photo-grid--fixed"
                   style={{ ['--grid-cols' as string]: String(GRID_COLS) }}
                 >
                   {gridItems.map((p) => {
-                    const i = photos.findIndex((x) => x.name === p.name)
+                    const i = visiblePhotos.findIndex((x) => x.name === p.name)
                     return (
                       <div
                         key={p.name}
@@ -1171,6 +1310,11 @@ export default function LibraryView({
                             />
                           </label>
                           <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
+                          {starred.has(p.name) && (
+                            <span className="photo-star-badge" title="Favourited" aria-label="Favourited">
+                              ★
+                            </span>
+                          )}
                         </div>
                       </div>
                     )
@@ -1211,6 +1355,11 @@ export default function LibraryView({
                   alt={viewer.name}
                   resetKey={viewer.name}
                 />
+                {starred.has(viewer.name) && (
+                  <span className="viewer-star-badge" title="Favourited" aria-label="Favourited">
+                    ★
+                  </span>
+                )}
               </div>
               {showExif && (
                 <div className="library-exif">
@@ -1228,7 +1377,7 @@ export default function LibraryView({
               <p className="filename">
                 {viewerBurst && viewerBurstIndex >= 0
                   ? `${bucketLabel(bucket)} — burst ${viewerBurstIndex + 1} / ${viewerBurst.photos.length} · ${viewer.name}`
-                  : `${bucketLabel(bucket)} — ${focused + 1} / ${photos.length} · ${viewer.name}`}
+                  : `${bucketLabel(bucket)} — ${focused + 1} / ${visiblePhotos.length} · ${viewer.name}`}
               </p>
               <div className="actions">
                 {bucket !== 'disliked' && (
@@ -1261,6 +1410,15 @@ export default function LibraryView({
                     Unclassified <kbd>U</kbd>
                   </button>
                 )}
+                <button
+                  type="button"
+                  className={`btn btn--neutral${starred.has(viewer.name) ? ' btn--star-on' : ''}`}
+                  disabled={starBusy}
+                  onClick={() => void toggleStar(viewer.name)}
+                  title={starred.has(viewer.name) ? 'Unfavourite (*)' : 'Favourite (*)'}
+                >
+                  {starred.has(viewer.name) ? '★ Starred' : '☆ Star'} <kbd>*</kbd>
+                </button>
                 <button
                   type="button"
                   className={`btn btn--neutral${showExif ? ' btn--exif-on' : ''}`}
@@ -1332,9 +1490,40 @@ export default function LibraryView({
                 Export {exportNames ? 'Selected' : bucketLabel(bucket)} Photos
               </h3>
               <p className="muted">
-                Creates folders of {EXPORT_BATCH_SIZE} photos and compresses each copy to ≤15MB.
-                Originals stay in {bucketLabel(bucket)}.
+                Creates folders of {EXPORT_BATCH_SIZE} photos. Originals stay in{' '}
+                {bucketLabel(bucket)}.
               </p>
+              <fieldset className="export-mode" disabled={exporting}>
+                <legend className="export-label">Quality</legend>
+                <label className="export-mode-option">
+                  <input
+                    type="radio"
+                    name="export-mode"
+                    value="compressed"
+                    checked={exportMode === 'compressed'}
+                    onChange={() => setExportMode('compressed')}
+                  />
+                  <span>
+                    Compress to ≤15MB
+                    <span className="export-mode-hint">JPEG copies for sharing / upload limits</span>
+                  </span>
+                </label>
+                <label className="export-mode-option">
+                  <input
+                    type="radio"
+                    name="export-mode"
+                    value="original"
+                    checked={exportMode === 'original'}
+                    onChange={() => setExportMode('original')}
+                  />
+                  <span>
+                    Original quality
+                    <span className="export-mode-hint">
+                      Exact copies — same size, format, and quality
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
               <label className="export-label" htmlFor="export-path">
                 Destination folder
               </label>
@@ -1354,6 +1543,7 @@ export default function LibraryView({
               <p className="muted export-meta">
                 {exportPhotoCount} photos → {Math.ceil(exportPhotoCount / EXPORT_BATCH_SIZE) || 0}{' '}
                 batches
+                {exportMode === 'original' ? ' · originals' : ' · ≤15MB JPEGs'}
               </p>
               <div className="actions">
                 <button

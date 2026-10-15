@@ -124,6 +124,65 @@ func TestBucketSelectedNames(t *testing.T) {
 	if res.Batches != 1 {
 		t.Fatalf("batches=%d", res.Batches)
 	}
+	if res.Mode != export.ModeCompressed {
+		t.Fatalf("mode=%q", res.Mode)
+	}
+}
+
+func TestBucketOriginalCopies(t *testing.T) {
+	root := t.TempDir()
+	store, err := filesystem.NewStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnsureClassificationDirs(); err != nil {
+		t.Fatal(err)
+	}
+	liked := filepath.Join(root, "liked")
+	// Distinct non-JPEG payload so we can prove the file was copied, not re-encoded.
+	pngPayload := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
+		0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xff, 0xff, 0x3f,
+		0x00, 0x05, 0xfe, 0x02, 0xfe, 0xa7, 0x35, 0x81, 0x84, 0x00, 0x00, 0x00,
+		0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	srcName := "shot001.PNG"
+	if err := os.WriteFile(filepath.Join(liked, srcName), pngPayload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liked, "shot002.jpg"), tinyJPEG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(t.TempDir(), "export-original")
+	res, err := export.Bucket(store, export.Options{
+		Bucket:      "liked",
+		Destination: out,
+		BatchSize:   30,
+		Mode:        export.ModeOriginal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Exported != 2 {
+		t.Fatalf("exported=%d", res.Exported)
+	}
+	if res.Mode != export.ModeOriginal {
+		t.Fatalf("mode=%q", res.Mode)
+	}
+	copied := filepath.Join(out, "batch-001", srcName)
+	got, err := os.ReadFile(copied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(pngPayload) {
+		t.Fatalf("original bytes changed")
+	}
+	if _, err := os.Stat(filepath.Join(out, "batch-001", "shot002.jpg")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func itoa(n int) string {

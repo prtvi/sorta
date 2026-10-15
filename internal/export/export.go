@@ -17,6 +17,11 @@ import (
 const (
 	DefaultBatchSize = 30
 	DefaultMaxBytes  = 15 * 1024 * 1024 // 15MB
+
+	// ModeCompressed re-encodes each photo as a JPEG ≤ MaxBytes.
+	ModeCompressed = "compressed"
+	// ModeOriginal copies each photo byte-for-byte with its original name and format.
+	ModeOriginal = "original"
 )
 
 // Options controls a bucket photo export.
@@ -25,6 +30,8 @@ type Options struct {
 	Destination string
 	BatchSize   int
 	MaxBytes    int64
+	// Mode is ModeCompressed (default) or ModeOriginal.
+	Mode string
 	// Names, when non-empty, limits the export to those filenames in the bucket.
 	Names []string
 }
@@ -34,6 +41,7 @@ type Result struct {
 	Destination string   `json:"destination"`
 	BatchSize   int      `json:"batch_size"`
 	MaxBytes    int64    `json:"max_bytes"`
+	Mode        string   `json:"mode"`
 	Exported    int      `json:"exported"`
 	Failed      int      `json:"failed"`
 	Batches     int      `json:"batches"`
@@ -41,7 +49,19 @@ type Result struct {
 	Errors      []string `json:"errors,omitempty"`
 }
 
-// Exportable reports whether photos from b may be batch-exported as JPEGs.
+// NormalizeMode returns a valid export mode, defaulting empty to compressed.
+func NormalizeMode(mode string) (string, error) {
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case "", ModeCompressed:
+		return ModeCompressed, nil
+	case ModeOriginal:
+		return ModeOriginal, nil
+	default:
+		return "", fmt.Errorf("invalid export mode %q (use %q or %q)", mode, ModeCompressed, ModeOriginal)
+	}
+}
+
+// Exportable reports whether photos from b may be batch-exported.
 func Exportable(b models.Bucket) bool {
 	switch b {
 	case models.BucketLiked, models.BucketShortlisted, models.BucketPosting, models.BucketSharing:
@@ -51,16 +71,22 @@ func Exportable(b models.Bucket) bool {
 	}
 }
 
-// Bucket exports photos from a library bucket into destination/batch-NNN/ folders as JPEGs ≤ maxBytes.
+// Bucket exports photos from a library bucket into destination/batch-NNN/ folders.
+// ModeCompressed writes JPEGs ≤ maxBytes; ModeOriginal copies files unchanged.
 // Originals in the working tree are never modified.
 func Bucket(store *filesystem.Store, opts Options) (*Result, error) {
 	if !Exportable(opts.Bucket) {
 		return nil, fmt.Errorf("export not allowed for bucket %q", opts.Bucket)
 	}
+	mode, err := NormalizeMode(opts.Mode)
+	if err != nil {
+		return nil, err
+	}
+	opts.Mode = mode
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = DefaultBatchSize
 	}
-	if opts.MaxBytes <= 0 {
+	if opts.Mode == ModeCompressed && opts.MaxBytes <= 0 {
 		opts.MaxBytes = DefaultMaxBytes
 	}
 	dest, err := sanitizeDestination(opts.Destination)
@@ -109,6 +135,7 @@ func Bucket(store *filesystem.Store, opts Options) (*Result, error) {
 		Destination: dest,
 		BatchSize:   opts.BatchSize,
 		MaxBytes:    opts.MaxBytes,
+		Mode:        opts.Mode,
 		BatchDirs:   []string{},
 	}
 	if len(photos) == 0 {
@@ -132,11 +159,20 @@ func Bucket(store *filesystem.Store, opts Options) (*Result, error) {
 		}
 		for _, p := range photos[start:end] {
 			src := filepath.Join(srcDir, p.Name)
-			outName := exportJPEGName(p.Name)
-			outPath := filepath.Join(batchDir, outName)
-			if err := CompressToMaxBytes(src, outPath, opts.MaxBytes); err != nil {
+			var outName string
+			var writeErr error
+			if opts.Mode == ModeOriginal {
+				outName = p.Name
+				outPath := filepath.Join(batchDir, outName)
+				writeErr = copyFile(src, outPath)
+			} else {
+				outName = exportJPEGName(p.Name)
+				outPath := filepath.Join(batchDir, outName)
+				writeErr = CompressToMaxBytes(src, outPath, opts.MaxBytes)
+			}
+			if writeErr != nil {
 				res.Failed++
-				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", p.Name, err))
+				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", p.Name, writeErr))
 				continue
 			}
 			res.Exported++

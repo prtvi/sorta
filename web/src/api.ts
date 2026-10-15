@@ -225,11 +225,14 @@ export async function burstKeep(
   return parseJSON<BurstKeepResponse>(res)
 }
 
+export type ExportMode = 'compressed' | 'original'
+
 export interface ExportResponse {
   success: boolean
   destination: string
   batch_size: number
   max_bytes: number
+  mode: ExportMode
   exported: number
   failed: number
   batches: number
@@ -252,8 +255,9 @@ export async function resetToUnclassified(): Promise<ResetUnclassifiedResponse> 
 export async function exportBucket(
   bucket: Bucket,
   destination: string,
-  opts?: { batchSize?: number; maxBytes?: number; names?: string[] },
+  opts?: { batchSize?: number; maxBytes?: number; mode?: ExportMode; names?: string[] },
 ): Promise<ExportResponse> {
+  const mode = opts?.mode ?? 'compressed'
   const res = await fetch('/api/export', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -261,7 +265,8 @@ export async function exportBucket(
       bucket,
       destination,
       batch_size: opts?.batchSize ?? 30,
-      max_bytes: opts?.maxBytes ?? 15 * 1024 * 1024,
+      max_bytes: mode === 'compressed' ? (opts?.maxBytes ?? 15 * 1024 * 1024) : undefined,
+      mode,
       names: opts?.names,
     }),
   })
@@ -297,4 +302,28 @@ export async function saveSession(state: SessionState): Promise<SessionState> {
     body: JSON.stringify(state),
   })
   return parseJSON<SessionState>(res)
+}
+
+export interface FavoritesState {
+  names: string[]
+}
+
+export interface StarResponse {
+  success: boolean
+  filename: string
+  starred: boolean
+}
+
+export async function fetchFavorites(): Promise<FavoritesState> {
+  const res = await fetch('/api/favorites')
+  return parseJSON<FavoritesState>(res)
+}
+
+export async function setPhotoStarred(filename: string, starred: boolean): Promise<StarResponse> {
+  const res = await fetch(`/api/photos/${encodeURIComponent(filename)}/star`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ starred }),
+  })
+  return parseJSON<StarResponse>(res)
 }

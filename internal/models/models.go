@@ -238,7 +238,9 @@ type ExportRequest struct {
 	Destination string   `json:"destination"`
 	BatchSize   int      `json:"batch_size,omitempty"`
 	MaxBytes    int64    `json:"max_bytes,omitempty"`
-	Names       []string `json:"names,omitempty"`
+	// Mode is "compressed" (default, JPEG ≤ max_bytes) or "original" (byte-for-byte copy).
+	Mode  string   `json:"mode,omitempty"`
+	Names []string `json:"names,omitempty"`
 }
 
 // ExportResponse is returned after exporting photos from a bucket.
@@ -247,6 +249,7 @@ type ExportResponse struct {
 	Destination string   `json:"destination"`
 	BatchSize   int      `json:"batch_size"`
 	MaxBytes    int64    `json:"max_bytes"`
+	Mode        string   `json:"mode"`
 	Exported    int      `json:"exported"`
 	Failed      int      `json:"failed"`
 	Batches     int      `json:"batches"`
@@ -290,4 +293,21 @@ type SessionState struct {
 	Mode       string `json:"mode"`
 	LastPhoto  string `json:"lastPhoto"`
 	LastBucket string `json:"lastBucket"`
+}
+
+// FavoritesState is starred (favourited) photo names in .sorta/favorites.json.
+type FavoritesState struct {
+	Names []string `json:"names"`
+}
+
+// StarRequest is PUT /api/photos/:filename/star.
+type StarRequest struct {
+	Starred bool `json:"starred"`
+}
+
+// StarResponse is returned after updating a photo's star.
+type StarResponse struct {
+	Success  bool   `json:"success"`
+	Filename string `json:"filename"`
+	Starred  bool   `json:"starred"`
 }
