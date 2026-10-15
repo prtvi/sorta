@@ -93,6 +93,12 @@ function exifLines(meta: ExifMetadata | null): string[] {
 
 const GRID_COLS = 8
 
+type SearchHit = { photo: Photo; bucket: Bucket }
+
+function matchPhotoName(name: string, query: string): boolean {
+  return name.toLowerCase().includes(query.toLowerCase())
+}
+
 export default function LibraryView({
   initialBucket = 'root',
   initialPhoto,
@@ -125,6 +131,7 @@ export default function LibraryView({
   const [starred, setStarred] = useState<Set<string>>(() => new Set())
   const [starBusy, setStarBusy] = useState(false)
   const [starredOnly, setStarredOnly] = useState(false)
+  const [showNames, setShowNames] = useState(false)
   const [busy, setBusy] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const [confirm, setConfirm] = useState<{ to: Bucket; names: string[] } | null>(null)
@@ -137,12 +144,18 @@ export default function LibraryView({
   const [resetOpen, setResetOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [exportSubOpen, setExportSubOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchExpanded, setSearchExpanded] = useState(false)
+  const [searchAllHits, setSearchAllHits] = useState<SearchHit[] | null>(null)
+  const [searchExpanding, setSearchExpanding] = useState(false)
   const lastClickRef = useRef<number>(-1)
   const shownAt = useRef(Date.now())
   const cacheRef = useRef<Map<Bucket, LibraryResponse>>(new Map())
   const loadGen = useRef(0)
   const toolsMenuRef = useRef<HTMLDivElement>(null)
   const focusedTileRef = useRef<HTMLDivElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const applyCountsFromStats = useCallback(
     (fs: Stats) => {
@@ -301,6 +314,111 @@ export default function LibraryView({
     () => photos.reduce((n, p) => n + (starred.has(p.name) ? 1 : 0), 0),
     [photos, starred],
   )
+
+  const searchTrimmed = searchQuery.trim()
+  const searchActive = searchOpen && searchTrimmed.length > 0
+
+  const localSearchHits = useMemo((): SearchHit[] => {
+    if (!searchTrimmed) return []
+    return photos
+      .filter((p) => matchPhotoName(p.name, searchTrimmed))
+      .map((photo) => ({ photo, bucket }))
+  }, [photos, searchTrimmed, bucket])
+
+  const displaySearchHits = searchExpanded ? (searchAllHits ?? []) : localSearchHits
+  const showExpandSearch =
+    searchActive && !searchExpanded && localSearchHits.length === 0 && !searchExpanding
+  const searchNotFound =
+    searchActive &&
+    searchExpanded &&
+    !searchExpanding &&
+    searchAllHits !== null &&
+    searchAllHits.length === 0
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchExpanded(false)
+    setSearchAllHits(null)
+    setSearchExpanding(false)
+  }, [])
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true)
+    setSearchExpanded(false)
+    setSearchAllHits(null)
+    window.setTimeout(() => searchInputRef.current?.focus(), 0)
+  }, [])
+
+  const expandSearch = useCallback(async () => {
+    const q = searchQuery.trim()
+    if (!q) return
+    setSearchExpanding(true)
+    setSearchExpanded(true)
+    setSearchAllHits(null)
+    const hits: SearchHit[] = []
+    try {
+      await Promise.all(
+        LIBRARY_BUCKETS.map(async (b) => {
+          let data = cacheRef.current.get(b)
+          if (!data) {
+            data = await fetchLibrary(b)
+            cacheRef.current.set(b, data)
+          }
+          for (const photo of data.photos) {
+            if (matchPhotoName(photo.name, q)) hits.push({ photo, bucket: b })
+          }
+        }),
+      )
+      hits.sort((a, b) => {
+        if (a.bucket !== b.bucket) {
+          return LIBRARY_BUCKETS.indexOf(a.bucket) - LIBRARY_BUCKETS.indexOf(b.bucket)
+        }
+        return a.photo.name.localeCompare(b.photo.name)
+      })
+      setSearchAllHits(hits)
+    } catch (e) {
+      setSearchAllHits([])
+      onToast(e instanceof Error ? e.message : 'Search failed', 'error')
+    } finally {
+      setSearchExpanding(false)
+    }
+  }, [searchQuery, onToast])
+
+  const openSearchHit = useCallback(
+    async (hit: SearchHit) => {
+      closeSearch()
+      if (hit.bucket !== bucket) {
+        await loadBucket(hit.bucket, hit.photo.name)
+      } else {
+        const i = photos.findIndex((p) => p.name === hit.photo.name)
+        if (i >= 0) {
+          const vis = starredOnly ? photos.filter((p) => starred.has(p.name)) : photos
+          const vi = vis.findIndex((p) => p.name === hit.photo.name)
+          setFocused(vi >= 0 ? vi : 0)
+        }
+      }
+      setViewer(hit.photo)
+      shownAt.current = Date.now()
+    },
+    [closeSearch, bucket, loadBucket, photos, starredOnly, starred],
+  )
+
+  useEffect(() => {
+    setSearchExpanded(false)
+    setSearchAllHits(null)
+    setSearchExpanding(false)
+  }, [bucket])
+
+  useEffect(() => {
+    setSearchExpanded(false)
+    setSearchAllHits(null)
+  }, [searchQuery])
+
+  useEffect(() => {
+    if (!searchOpen) return
+    searchInputRef.current?.focus()
+  }, [searchOpen])
 
   const pendingFocusName = useRef<string | null>(null)
 
@@ -777,6 +895,13 @@ export default function LibraryView({
         }
         return
       }
+      if (searchOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          closeSearch()
+        }
+        return
+      }
       if (viewer) {
         if (e.key === 'i' || e.key === 'I') {
           e.preventDefault()
@@ -923,7 +1048,7 @@ export default function LibraryView({
         setSelected(new Set(visiblePhotos.map((p) => p.name)))
       }
     },
-    [visiblePhotos, visibleBursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, selectRowContaining, requestMove, runUndo, onToggleFullscreen, revealInFinder, toggleStar],
+    [visiblePhotos, visibleBursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, searchOpen, closeSearch, selectRowContaining, requestMove, runUndo, onToggleFullscreen, revealInFinder, toggleStar],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -983,7 +1108,6 @@ export default function LibraryView({
                 ? ` · ${visibleBursts.length} burst${visibleBursts.length === 1 ? '' : 's'}`
                 : ''}
               {selected.size > 0 ? ` · ${selected.size} selected` : ''}
-              {visiblePhotos.length > 0 ? ' · ⌥-click / R select row' : ''}
             </span>
             <button
               type="button"
@@ -1005,8 +1129,78 @@ export default function LibraryView({
               {starredOnly ? '★ Starred' : '☆ Starred'}
               {starredInBucket > 0 ? ` · ${starredInBucket}` : ''}
             </button>
+            <button
+              type="button"
+              className={`filter-star${showNames ? ' filter-star--active' : ''}`}
+              aria-pressed={showNames}
+              disabled={detecting}
+              title={showNames ? 'Hide file names' : 'Show file names'}
+              onClick={() => setShowNames((v) => !v)}
+            >
+              Names
+            </button>
+            <div className={`library-search${searchOpen ? ' library-search--open' : ''}`}>
+              {!searchOpen ? (
+                <button
+                  type="button"
+                  className="library-search-toggle"
+                  disabled={detecting}
+                  title="Search by file name"
+                  aria-label="Search by file name"
+                  onClick={openSearch}
+                >
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M10 10l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              ) : (
+                <div className="library-search-bar">
+                  <svg
+                    className="library-search-bar-icon"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M10 10l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    ref={searchInputRef}
+                    type="search"
+                    className="library-search-input"
+                    placeholder={`Search in ${bucketLabel(bucket)}…`}
+                    value={searchQuery}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        closeSearch()
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="library-search-clear"
+                    title="Close search"
+                    aria-label="Close search"
+                    onClick={closeSearch}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <div className="library-toolbar-actions">
+            {visiblePhotos.length > 0 && (
+              <span className="muted library-toolbar-hint">⌥-click / R select row</span>
+            )}
             <button
               type="button"
               className="btn btn--neutral btn--small"
@@ -1189,7 +1383,66 @@ export default function LibraryView({
           </div>
         )}
 
-        {photos.length === 0 ? (
+        {searchActive ? (
+          <div className="library-scroll library-search-results">
+            {searchExpanding ? (
+              <div className="state">
+                <p>Searching all categories…</p>
+              </div>
+            ) : displaySearchHits.length > 0 ? (
+              <>
+                <p className="library-search-summary muted">
+                  {searchExpanded
+                    ? `${displaySearchHits.length} match${displaySearchHits.length === 1 ? '' : 'es'} across all categories`
+                    : `${displaySearchHits.length} match${displaySearchHits.length === 1 ? '' : 'es'} in ${bucketLabel(bucket)}`}
+                </p>
+                <div className="library-search-grid">
+                  {displaySearchHits.map((hit) => (
+                    <button
+                      key={`${hit.bucket}:${hit.photo.name}`}
+                      type="button"
+                      className="library-search-hit"
+                      onClick={() => void openSearchHit(hit)}
+                    >
+                      <div className="library-search-hit-media">
+                        <img
+                          src={imageUrl(hit.photo.url, 'thumb')}
+                          alt={hit.photo.name}
+                          loading="lazy"
+                          draggable={false}
+                        />
+                      </div>
+                      <span className="library-search-hit-name" title={hit.photo.name}>
+                        {hit.photo.name}
+                      </span>
+                      {searchExpanded && (
+                        <span className="library-search-hit-bucket muted">{bucketLabel(hit.bucket)}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : showExpandSearch ? (
+              <div className="state library-search-empty">
+                <p>Not found in {bucketLabel(bucket)}</p>
+                <p className="muted">Search other categories and Unclassified?</p>
+                <button
+                  type="button"
+                  className="btn btn--neutral btn--small"
+                  disabled={searchExpanding}
+                  onClick={() => void expandSearch()}
+                >
+                  Expand search
+                </button>
+              </div>
+            ) : searchNotFound ? (
+              <div className="state">
+                <p>Not found</p>
+                <p className="muted">No photo matches “{searchTrimmed}” in any category.</p>
+              </div>
+            ) : null}
+          </div>
+        ) : photos.length === 0 ? (
           <div className="state">
             <p>No photos here.</p>
             <p className="muted">Photos you move to this bucket will appear here.</p>
@@ -1239,7 +1492,7 @@ export default function LibraryView({
                           <div
                             key={p.name}
                             ref={focused === i ? focusedTileRef : undefined}
-                            className={`photo-tile photo-tile--burst${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                            className={`photo-tile photo-tile--burst${showNames ? ' photo-tile--named' : ''}${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
                             title={p.name}
                             draggable
                             onDragStart={(e) => onDragStart(e, p.name)}
@@ -1272,6 +1525,7 @@ export default function LibraryView({
                                 Keep
                               </button>
                             </div>
+                            {showNames && <span className="photo-tile-name">{p.name}</span>}
                           </div>
                         )
                       })}
@@ -1295,7 +1549,7 @@ export default function LibraryView({
                       <div
                         key={p.name}
                         ref={focused === i ? focusedTileRef : undefined}
-                        className={`photo-tile${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                        className={`photo-tile${showNames ? ' photo-tile--named' : ''}${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
                         title={p.name}
                         draggable
                         onDragStart={(e) => onDragStart(e, p.name)}
@@ -1316,6 +1570,7 @@ export default function LibraryView({
                             </span>
                           )}
                         </div>
+                        {showNames && <span className="photo-tile-name">{p.name}</span>}
                       </div>
                     )
                   })}
