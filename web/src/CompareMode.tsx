@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { movePhoto, imageUrl, toastToneForBucket, type Bucket, type Photo, type ToastTone } from './api'
+import {
+  bucketAllowsMoves,
+  movePhoto,
+  imageUrl,
+  toastToneForBucket,
+  type Bucket,
+  type Photo,
+  type ToastTone,
+} from './api'
 import { useKeyboard } from './hooks/useKeyboard'
 import ZoomableImage from './ZoomableImage'
 
@@ -32,9 +40,11 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
     }
   }, [zoomed, photos.length, onExit])
 
+  const canMove = bucketAllowsMoves(bucket)
+
   const moveActive = async (to: Bucket) => {
     const p = photos[active]
-    if (!p) return
+    if (!p || !canMove || !bucketAllowsMoves(to)) return
     try {
       await movePhoto(p.name, bucket, to)
       onToast(`Moved ${p.name} to ${to === 'root' ? 'Unclassified' : to}`, toastToneForBucket(to))
@@ -68,24 +78,30 @@ export default function CompareMode({ photos, bucket, onExit, onToast, onMoved }
         ))}
       </div>
       <div className="actions">
-        <button type="button" className="btn btn--like" onClick={() => void moveActive('liked')}>
-          Like focused
-        </button>
-        <button type="button" className="btn btn--shortlisted" onClick={() => void moveActive('shortlisted')}>
-          Shortlist focused
-        </button>
-        <button type="button" className="btn btn--posting" onClick={() => void moveActive('posting')}>
-          Posting focused
-        </button>
-        <button type="button" className="btn btn--sharing" onClick={() => void moveActive('sharing')}>
-          Sharing focused
-        </button>
-        <button type="button" className="btn btn--dislike" onClick={() => void moveActive('disliked')}>
-          Reject focused
-        </button>
-        <button type="button" className="btn btn--neutral" onClick={() => void moveActive('root')}>
-          Unclassified focused
-        </button>
+        {canMove ? (
+          <>
+            <button type="button" className="btn btn--like" onClick={() => void moveActive('liked')}>
+              Like focused
+            </button>
+            <button type="button" className="btn btn--shortlisted" onClick={() => void moveActive('shortlisted')}>
+              Shortlist focused
+            </button>
+            <button type="button" className="btn btn--posting" onClick={() => void moveActive('posting')}>
+              Posting focused
+            </button>
+            <button type="button" className="btn btn--sharing" onClick={() => void moveActive('sharing')}>
+              Sharing focused
+            </button>
+            <button type="button" className="btn btn--dislike" onClick={() => void moveActive('disliked')}>
+              Reject focused
+            </button>
+            <button type="button" className="btn btn--neutral" onClick={() => void moveActive('root')}>
+              Unclassified focused
+            </button>
+          </>
+        ) : (
+          <span className="muted">Posted is Finder-managed — files cannot be moved</span>
+        )}
         <button type="button" className="btn btn--neutral" onClick={() => setZoomed(photos[active] ?? null)}>
           Open larger
         </button>

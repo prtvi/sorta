@@ -423,6 +423,10 @@ func (s *Server) handleBurstKeep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_ACTION", "Invalid keep_action, rest_action, or from")
 		return
 	}
+	if !req.From.Movable() {
+		writeError(w, http.StatusBadRequest, "IMMUTABLE_BUCKET", "Posted is Finder-managed; photos cannot be moved in or out")
+		return
+	}
 
 	photos, err := s.Store.ListLibraryBucket(req.From)
 	if err != nil {
@@ -517,6 +521,10 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_BUCKET", "Invalid from/to bucket")
 		return
 	}
+	if !req.From.Movable() || !req.To.Movable() {
+		writeError(w, http.StatusBadRequest, "IMMUTABLE_BUCKET", "Posted is Finder-managed; photos cannot be moved in or out")
+		return
+	}
 
 	rec, err := s.Store.MoveBetweenBuckets(req.Filename, req.From, req.To)
 	if err != nil {
@@ -566,6 +574,10 @@ func (s *Server) handleMoveBulk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_BUCKET", "Invalid destination bucket")
 		return
 	}
+	if !req.To.Movable() {
+		writeError(w, http.StatusBadRequest, "IMMUTABLE_BUCKET", "Posted is Finder-managed; photos cannot be moved in or out")
+		return
+	}
 	if len(req.Photos) == 0 {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "No photos provided")
 		return
@@ -585,6 +597,12 @@ func (s *Server) handleMoveBulk(w http.ResponseWriter, r *http.Request) {
 		}
 		if !item.From.Valid() {
 			res.Error = "INVALID_BUCKET"
+			failed++
+			results = append(results, res)
+			continue
+		}
+		if !item.From.Movable() {
+			res.Error = "IMMUTABLE_BUCKET"
 			failed++
 			results = append(results, res)
 			continue

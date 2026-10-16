@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  bucketAllowsMoves,
   burstKeep,
   detectBursts,
   exportBucket,
@@ -41,7 +42,15 @@ type Props = {
   onToggleFullscreen: () => void
 }
 
-const LIBRARY_BUCKETS: Bucket[] = ['root', 'liked', 'shortlisted', 'posting', 'sharing', 'disliked']
+const LIBRARY_BUCKETS: Bucket[] = [
+  'root',
+  'liked',
+  'shortlisted',
+  'posting',
+  'sharing',
+  'disliked',
+  'posted',
+]
 const EXPORTABLE_BUCKETS: Bucket[] = ['liked', 'shortlisted', 'posting', 'sharing']
 const EXPORT_BATCH_SIZE = 30
 const EXPORT_MAX_BYTES = 15 * 1024 * 1024
@@ -53,23 +62,6 @@ function canExportPhotos(b: Bucket): boolean {
 function bucketLabel(b: Bucket) {
   if (b === 'root') return 'Unclassified'
   return b.charAt(0).toUpperCase() + b.slice(1)
-}
-
-function bucketShortLabel(b: Bucket) {
-  switch (b) {
-    case 'root':
-      return 'Unc'
-    case 'liked':
-      return 'Liked'
-    case 'shortlisted':
-      return 'Short'
-    case 'posting':
-      return 'Post'
-    case 'sharing':
-      return 'Share'
-    case 'disliked':
-      return 'Dis'
-  }
 }
 
 function burstContaining(groups: BurstGroup[], name: string): BurstGroup | undefined {
@@ -124,6 +116,7 @@ export default function LibraryView({
     posting: 0,
     sharing: 0,
     disliked: 0,
+    posted: 0,
   })
   const [focused, setFocused] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -171,6 +164,7 @@ export default function LibraryView({
         posting: fs.posting,
         sharing: fs.sharing,
         disliked: fs.disliked,
+        posted: fs.posted ?? 0,
       })
     },
     [],
@@ -413,6 +407,7 @@ export default function LibraryView({
     setSearchExpanded(false)
     setSearchAllHits(null)
     setSearchExpanding(false)
+    setStarredOnly(false)
   }, [bucket])
 
   useEffect(() => {
@@ -495,6 +490,10 @@ export default function LibraryView({
   const doMove = useCallback(
     async (names: string[], to: Bucket) => {
       if (names.length === 0 || to === bucket || busy) return
+      if (!bucketAllowsMoves(bucket) || !bucketAllowsMoves(to)) {
+        onToast('Posted is Finder-managed — files cannot be moved in or out', 'neutral')
+        return
+      }
       setBusy(true)
       try {
         if (names.length === 1) {
@@ -548,6 +547,7 @@ export default function LibraryView({
 
   const requestMove = useCallback(
     (to: Bucket) => {
+      if (!bucketAllowsMoves(bucket) || !bucketAllowsMoves(to)) return
       const names = targets()
       if (names.length === 0) return
       if (names.length > 1) {
@@ -556,7 +556,7 @@ export default function LibraryView({
       }
       void doMove(names, to)
     },
-    [targets, doMove],
+    [targets, doMove, bucket],
   )
 
   const runUndo = useCallback(async () => {
@@ -1088,6 +1088,10 @@ export default function LibraryView({
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
+    if (!bucketAllowsMoves(bucket)) {
+      e.preventDefault()
+      return
+    }
     const names = selected.has(name) && selected.size > 0 ? [...selected] : [name]
     e.dataTransfer.setData('application/x-sorta-photos', JSON.stringify(names))
     e.dataTransfer.effectAllowed = 'move'
@@ -1096,6 +1100,7 @@ export default function LibraryView({
   const onDropBucket = (e: React.DragEvent, to: Bucket) => {
     e.preventDefault()
     setDragOver(null)
+    if (!bucketAllowsMoves(bucket) || !bucketAllowsMoves(to)) return
     try {
       const names = JSON.parse(e.dataTransfer.getData('application/x-sorta-photos')) as string[]
       if (!Array.isArray(names) || names.length === 0) return
@@ -1121,16 +1126,21 @@ export default function LibraryView({
               type="button"
               className={`category-card category-card--${b}${bucket === b ? ' category-card--active' : ''}${dragOver === b ? ' category-card--drag' : ''}`}
               disabled={detecting}
-              title={bucketLabel(b)}
+              title={
+                b === 'posted'
+                  ? 'Posted — Finder-managed archive of finals already posted'
+                  : bucketLabel(b)
+              }
               onClick={() => void loadBucket(b)}
               onDragOver={(e) => {
+                if (!bucketAllowsMoves(b) || !bucketAllowsMoves(bucket)) return
                 e.preventDefault()
                 setDragOver(b)
               }}
               onDragLeave={() => setDragOver(null)}
               onDrop={(e) => onDropBucket(e, b)}
             >
-              <span className="category-card-label">{bucketShortLabel(b)}</span>
+              <span className="category-card-label">{bucketLabel(b)}</span>
               <span className="category-card-count">{counts[b]}</span>
             </button>
           ))}
@@ -1138,7 +1148,8 @@ export default function LibraryView({
         <div className="library-toolbar">
           <div className="library-toolbar-meta">
             <span className="muted">
-              {bucketLabel(bucket)} ·{' '}
+              {bucketLabel(bucket)}
+              {bucket === 'posted' ? ' · Finder-managed' : ''} ·{' '}
               {starredOnly ? `${visiblePhotos.length} of ${photos.length}` : photos.length}
               {visibleBursts.length > 0
                 ? ` · ${visibleBursts.length} burst${visibleBursts.length === 1 ? '' : 's'}`
@@ -1173,7 +1184,7 @@ export default function LibraryView({
               title={showNames ? 'Hide file names' : 'Show file names'}
               onClick={() => setShowNames((v) => !v)}
             >
-              Names
+              Show names
             </button>
             <div className={`library-search${searchOpen ? ' library-search--open' : ''}`}>
               {!searchOpen ? (
@@ -1381,40 +1392,46 @@ export default function LibraryView({
         {selected.size > 0 && (
           <div className="selection-bar">
             <span>{selected.size} selected</span>
-            {bucket !== 'root' && (
-              <button type="button" className="btn btn--neutral btn--small" disabled={busy} onClick={() => requestMove('root')}>
-                Unclassified
-              </button>
-            )}
-            {bucket !== 'sharing' && (
-              <button type="button" className="btn btn--sharing btn--small" disabled={busy} onClick={() => requestMove('sharing')}>
-                Sharing
-              </button>
-            )}
-            {bucket !== 'liked' && (
-              <button type="button" className="btn btn--like btn--small" disabled={busy} onClick={() => requestMove('liked')}>
-                Like
-              </button>
-            )}
-            {bucket !== 'shortlisted' && (
-              <button
-                type="button"
-                className="btn btn--shortlisted btn--small"
-                disabled={busy}
-                onClick={() => requestMove('shortlisted')}
-              >
-                Shortlist
-              </button>
-            )}
-            {bucket !== 'posting' && (
-              <button type="button" className="btn btn--posting btn--small" disabled={busy} onClick={() => requestMove('posting')}>
-                Posting
-              </button>
-            )}
-            {bucket !== 'disliked' && (
-              <button type="button" className="btn btn--dislike btn--small" disabled={busy} onClick={() => requestMove('disliked')}>
-                Reject
-              </button>
+            {bucketAllowsMoves(bucket) ? (
+              <>
+                {bucket !== 'root' && (
+                  <button type="button" className="btn btn--neutral btn--small" disabled={busy} onClick={() => requestMove('root')}>
+                    Unclassified
+                  </button>
+                )}
+                {bucket !== 'sharing' && (
+                  <button type="button" className="btn btn--sharing btn--small" disabled={busy} onClick={() => requestMove('sharing')}>
+                    Sharing
+                  </button>
+                )}
+                {bucket !== 'liked' && (
+                  <button type="button" className="btn btn--like btn--small" disabled={busy} onClick={() => requestMove('liked')}>
+                    Like
+                  </button>
+                )}
+                {bucket !== 'shortlisted' && (
+                  <button
+                    type="button"
+                    className="btn btn--shortlisted btn--small"
+                    disabled={busy}
+                    onClick={() => requestMove('shortlisted')}
+                  >
+                    Shortlist
+                  </button>
+                )}
+                {bucket !== 'posting' && (
+                  <button type="button" className="btn btn--posting btn--small" disabled={busy} onClick={() => requestMove('posting')}>
+                    Posting
+                  </button>
+                )}
+                {bucket !== 'disliked' && (
+                  <button type="button" className="btn btn--dislike btn--small" disabled={busy} onClick={() => requestMove('disliked')}>
+                    Reject
+                  </button>
+                )}
+              </>
+            ) : (
+              <span className="muted">Add or remove files in Finder</span>
             )}
           </div>
         )}
@@ -1530,7 +1547,7 @@ export default function LibraryView({
                             ref={focused === i ? focusedTileRef : undefined}
                             className={`photo-tile photo-tile--burst${showNames ? ' photo-tile--named' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
                             title={p.name}
-                            draggable
+                            draggable={bucketAllowsMoves(bucket)}
                             onDragStart={(e) => onDragStart(e, p.name)}
                             onClick={(e) => onTileClick(i, e)}
                           >
@@ -1548,18 +1565,20 @@ export default function LibraryView({
                                   ★
                                 </span>
                               )}
-                              <button
-                                type="button"
-                                className="burst-keep-one"
-                                disabled={busy || detecting}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void runBurstKeep(p.name)
-                                }}
-                                title="Keep this, dislike rest of burst"
-                              >
-                                Keep
-                              </button>
+                              {bucketAllowsMoves(bucket) && (
+                                <button
+                                  type="button"
+                                  className="burst-keep-one"
+                                  disabled={busy || detecting}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void runBurstKeep(p.name)
+                                  }}
+                                  title="Keep this, dislike rest of burst"
+                                >
+                                  Keep
+                                </button>
+                              )}
                             </div>
                             {showNames && <span className="photo-tile-name">{p.name}</span>}
                           </div>
@@ -1593,7 +1612,7 @@ export default function LibraryView({
                             className={`photo-tile photo-tile--justified${showNames ? ' photo-tile--named' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
                             style={{ width: tile.width, height: tile.height }}
                             title={p.name}
-                            draggable
+                            draggable={bucketAllowsMoves(bucket)}
                             onDragStart={(e) => onDragStart(e, p.name)}
                             onClick={(e) => onTileClick(i, e)}
                           >
@@ -1685,35 +1704,39 @@ export default function LibraryView({
                   : `${bucketLabel(bucket)} — ${focused + 1} / ${visiblePhotos.length} · ${viewer.name}`}
               </p>
               <div className="actions">
-                {bucket !== 'disliked' && (
-                  <button type="button" className="btn btn--dislike" onClick={() => requestMove('disliked')}>
-                    Reject <kbd>X</kbd>
-                  </button>
-                )}
-                {bucket !== 'sharing' && (
-                  <button type="button" className="btn btn--sharing" onClick={() => requestMove('sharing')}>
-                    Sharing <kbd>S</kbd>
-                  </button>
-                )}
-                {bucket !== 'liked' && (
-                  <button type="button" className="btn btn--like" onClick={() => requestMove('liked')}>
-                    Like <kbd>L</kbd>
-                  </button>
-                )}
-                {bucket !== 'shortlisted' && (
-                  <button type="button" className="btn btn--shortlisted" onClick={() => requestMove('shortlisted')}>
-                    Shortlist <kbd>T</kbd>
-                  </button>
-                )}
-                {bucket !== 'posting' && (
-                  <button type="button" className="btn btn--posting" onClick={() => requestMove('posting')}>
-                    Posting <kbd>P</kbd>
-                  </button>
-                )}
-                {bucket !== 'root' && (
-                  <button type="button" className="btn btn--neutral" onClick={() => requestMove('root')}>
-                    Unclassified <kbd>U</kbd>
-                  </button>
+                {bucketAllowsMoves(bucket) && (
+                  <>
+                    {bucket !== 'disliked' && (
+                      <button type="button" className="btn btn--dislike" onClick={() => requestMove('disliked')}>
+                        Reject <kbd>X</kbd>
+                      </button>
+                    )}
+                    {bucket !== 'sharing' && (
+                      <button type="button" className="btn btn--sharing" onClick={() => requestMove('sharing')}>
+                        Sharing <kbd>S</kbd>
+                      </button>
+                    )}
+                    {bucket !== 'liked' && (
+                      <button type="button" className="btn btn--like" onClick={() => requestMove('liked')}>
+                        Like <kbd>L</kbd>
+                      </button>
+                    )}
+                    {bucket !== 'shortlisted' && (
+                      <button type="button" className="btn btn--shortlisted" onClick={() => requestMove('shortlisted')}>
+                        Shortlist <kbd>T</kbd>
+                      </button>
+                    )}
+                    {bucket !== 'posting' && (
+                      <button type="button" className="btn btn--posting" onClick={() => requestMove('posting')}>
+                        Posting <kbd>P</kbd>
+                      </button>
+                    )}
+                    {bucket !== 'root' && (
+                      <button type="button" className="btn btn--neutral" onClick={() => requestMove('root')}>
+                        Unclassified <kbd>U</kbd>
+                      </button>
+                    )}
+                  </>
                 )}
                 <button
                   type="button"

@@ -29,7 +29,7 @@ func main() {
 	noOpen := flag.Bool("no-open", false, "Do not open the browser automatically")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: sorta [flags] <photo-directory>\n\n")
-		fmt.Fprintf(os.Stderr, "Local-first photo culling. Classifies photos into liked/, shortlisted/, posting/, sharing/, disliked/.\n\n")
+		fmt.Fprintf(os.Stderr, "Local-first photo culling. Classifies photos into liked/, shortlisted/, posting/, sharing/, disliked/. Posted finals live in posted/ (Finder-managed).\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()

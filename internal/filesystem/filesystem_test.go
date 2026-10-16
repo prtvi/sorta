@@ -18,11 +18,32 @@ func TestNewStoreAndEnsureDirs(t *testing.T) {
 	if err := store.EnsureClassificationDirs(); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"liked", "shortlisted", "posting", "disliked", "sharing"} {
+	for _, name := range []string{"liked", "shortlisted", "posting", "disliked", "sharing", "posted"} {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || !info.IsDir() {
 			t.Fatalf("missing dir %s: %v", name, err)
 		}
+	}
+}
+
+func TestMoveBetweenBucketsRejectsPosted(t *testing.T) {
+	dir := t.TempDir()
+	store, err := filesystem.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.EnsureClassificationDirs()
+	if err := os.WriteFile(filepath.Join(dir, "liked", "a.jpg"), []byte("j"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "posted", "b.jpg"), []byte("j"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MoveBetweenBuckets("a.jpg", models.BucketLiked, models.BucketPosted); err == nil {
+		t.Fatal("expected move into posted to fail")
+	}
+	if _, err := store.MoveBetweenBuckets("b.jpg", models.BucketPosted, models.BucketLiked); err == nil {
+		t.Fatal("expected move out of posted to fail")
 	}
 }
 

@@ -35,6 +35,7 @@ const emptyStats: Stats = {
   shortlisted: 0,
   posting: 0,
   disliked: 0,
+  posted: 0,
   sharing: 0,
 }
 
@@ -160,7 +161,9 @@ export default function App() {
             sess.lastBucket === 'shortlisted' ||
             sess.lastBucket === 'posting' ||
             sess.lastBucket === 'sharing' ||
-            sess.lastBucket === 'disliked'
+            sess.lastBucket === 'disliked' ||
+            sess.lastBucket === 'posted' ||
+            sess.lastBucket === 'root'
           ) {
             resumeBucket = sess.lastBucket
           }

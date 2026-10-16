@@ -9,6 +9,7 @@
   --like: #4ec98a;
   --shortlisted: #56b6a8;
   --posting: #5b9fd4;
+  --posted: #9a8b7a;
   --border: #2a2a2e;
   --font: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
   --mono: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
@@ -508,6 +509,12 @@ kbd {
   border-color: color-mix(in srgb, var(--dislike) 55%, var(--border));
 }
 
+.toast--posted {
+  background: color-mix(in srgb, var(--posted) 16%, var(--bg-elevated));
+  color: #efe6d8;
+  border-color: color-mix(in srgb, var(--posted) 55%, var(--border));
+}
+
 .toast--root,
 .toast--neutral {
   background: var(--bg-elevated);
@@ -659,8 +666,8 @@ kbd {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.15rem;
-  min-width: 4.2rem;
-  padding: 0.4rem 0.55rem;
+  min-width: 5.5rem;
+  padding: 0.4rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 0.35rem;
   background: var(--bg-elevated);
@@ -688,9 +695,10 @@ kbd {
 }
 
 .category-card-label {
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   color: var(--muted);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .category-card-count {
@@ -722,6 +730,11 @@ kbd {
 .category-card--disliked.category-card--active {
   border-color: color-mix(in srgb, var(--dislike) 55%, var(--border));
   background: color-mix(in srgb, var(--dislike) 10%, var(--bg-elevated));
+}
+
+.category-card--posted.category-card--active {
+  border-color: color-mix(in srgb, var(--posted) 55%, var(--border));
+  background: color-mix(in srgb, var(--posted) 10%, var(--bg-elevated));
 }
 
 .library-main {

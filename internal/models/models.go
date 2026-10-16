@@ -10,12 +10,13 @@ const (
 	BucketPosting     Bucket = "posting"
 	BucketSharing     Bucket = "sharing"
 	BucketDisliked    Bucket = "disliked"
+	BucketPosted      Bucket = "posted" // archive of already-posted finals; Finder-managed
 )
 
 // Valid reports whether b is a known bucket.
 func (b Bucket) Valid() bool {
 	switch b {
-	case BucketRoot, BucketLiked, BucketShortlisted, BucketPosting, BucketSharing, BucketDisliked:
+	case BucketRoot, BucketLiked, BucketShortlisted, BucketPosting, BucketSharing, BucketDisliked, BucketPosted:
 		return true
 	default:
 		return false
@@ -26,6 +27,12 @@ func (b Bucket) Valid() bool {
 // Includes root (Unclassified) so burst groups can be browsed before culling.
 func (b Bucket) LibraryBucket() bool {
 	return b.Valid()
+}
+
+// Movable reports whether photos may be moved into or out of this bucket via Sorta.
+// Posted is Finder-managed only — no in/out classification moves.
+func (b Bucket) Movable() bool {
+	return b.Valid() && b != BucketPosted
 }
 
 // Photo represents a photo file.
@@ -137,6 +144,7 @@ type Stats struct {
 	Posting     int `json:"posting"`
 	Sharing     int `json:"sharing"`
 	Disliked    int `json:"disliked"`
+	Posted      int `json:"posted"`
 }
 
 // SessionStats tracks actions in the current process only.

@@ -11,7 +11,7 @@ import (
 )
 
 // ClassificationDirs are created under the working directory at startup.
-var ClassificationDirs = []string{"liked", "shortlisted", "posting", "sharing", "disliked"}
+var ClassificationDirs = []string{"liked", "shortlisted", "posting", "sharing", "disliked", "posted"}
 
 // Store performs safe filesystem operations constrained to a root directory.
 type Store struct {
@@ -34,7 +34,7 @@ func NewStore(root string) (*Store, error) {
 	return &Store{Root: abs}, nil
 }
 
-// EnsureClassificationDirs creates liked/, shortlisted/, posting/, sharing/, and disliked/ if missing.
+// EnsureClassificationDirs creates liked/, shortlisted/, posting/, sharing/, disliked/, and posted/ if missing.
 func (s *Store) EnsureClassificationDirs() error {
 	for _, name := range ClassificationDirs {
 		dir := filepath.Join(s.Root, name)
@@ -150,6 +150,7 @@ func (s *Store) FindInLibrary(name string) (string, error) {
 		models.BucketPosting,
 		models.BucketSharing,
 		models.BucketDisliked,
+		models.BucketPosted,
 	} {
 		path, err := s.ResolveInBucket(b, name)
 		if err != nil {
@@ -179,6 +180,9 @@ func (s *Store) BucketDir(bucket models.Bucket) (string, error) {
 func (s *Store) MoveBetweenBuckets(filename string, from, to models.Bucket) (*models.ActionRecord, error) {
 	if !from.Valid() || !to.Valid() {
 		return nil, fmt.Errorf("invalid bucket")
+	}
+	if !from.Movable() || !to.Movable() {
+		return nil, fmt.Errorf("posted bucket does not allow moves")
 	}
 	if from == to {
 		return nil, fmt.Errorf("source and destination are the same")
@@ -286,7 +290,7 @@ func companionDestination(destDir, photoDest, companionSrc string) (string, erro
 	return uniqueDestination(dest)
 }
 
-// ListLibraryBucket returns photos in a bucket (root|liked|shortlisted|posting|sharing|disliked).
+// ListLibraryBucket returns photos in a bucket (root|liked|shortlisted|posting|sharing|disliked|posted).
 func (s *Store) ListLibraryBucket(bucket models.Bucket) ([]models.Photo, error) {
 	if !bucket.LibraryBucket() {
 		return nil, fmt.Errorf("invalid library bucket")
@@ -387,8 +391,12 @@ func (s *Store) CollectStats() (models.Stats, error) {
 	if err != nil {
 		return models.Stats{}, err
 	}
+	posted, err := scanner.CountInDir(filepath.Join(s.Root, "posted"))
+	if err != nil {
+		return models.Stats{}, err
+	}
 	return models.Stats{
-		Total:       remaining + liked + shortlisted + posting + sharing + disliked,
+		Total:       remaining + liked + shortlisted + posting + sharing + disliked + posted,
 		Remaining:   remaining,
 		Root:        remaining,
 		Liked:       liked,
@@ -396,5 +404,6 @@ func (s *Store) CollectStats() (models.Stats, error) {
 		Posting:     posting,
 		Sharing:     sharing,
 		Disliked:    disliked,
+		Posted:      posted,
 	}, nil
 }

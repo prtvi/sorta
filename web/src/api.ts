@@ -1,5 +1,5 @@
 export type PhotoAction = 'liked' | 'shortlisted' | 'disliked' | 'sharing'
-export type Bucket = 'root' | 'liked' | 'shortlisted' | 'posting' | 'sharing' | 'disliked'
+export type Bucket = 'root' | 'liked' | 'shortlisted' | 'posting' | 'sharing' | 'disliked' | 'posted'
 export type AppMode = 'cull' | 'library' | 'compare'
 export type ImageSize = 'view' | 'thumb'
 export type ToastTone = 'neutral' | 'error' | Bucket
@@ -36,6 +36,12 @@ export interface Stats {
   posting: number
   sharing: number
   disliked: number
+  posted: number
+}
+
+/** Posted is Finder-managed; Sorta never moves files in or out. */
+export function bucketAllowsMoves(b: Bucket): boolean {
+  return b !== 'posted'
 }
 
 export interface SessionStats {
