@@ -1078,6 +1078,58 @@ kbd {
   grid-template-columns: repeat(var(--grid-cols, 8), minmax(0, 1fr));
 }
 
+.photo-justified {
+  display: flex;
+  flex-direction: column;
+  gap: var(--justified-gap, 0.5px);
+  width: 100%;
+  min-width: 0;
+  background: #000;
+}
+
+.photo-justified-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: var(--justified-gap, 0.5px);
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.photo-tile--justified {
+  flex: 0 0 auto;
+  border-radius: 0;
+  background: #050505;
+  overflow: hidden;
+}
+
+.photo-tile--justified:hover {
+  transform: none;
+}
+
+.photo-tile--justified .photo-tile-media {
+  aspect-ratio: auto;
+  width: 100%;
+  height: 100%;
+}
+
+.photo-tile--justified.photo-tile--named .photo-tile-media {
+  border-radius: 0;
+}
+
+.photo-tile--justified .photo-tile-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 0.35rem 0.4rem;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+  color: #e8e8ea;
+  pointer-events: none;
+}
+
 .section-title {
   margin: 0 0 0.5rem;
   font-size: 0.8rem;
@@ -1266,10 +1318,6 @@ kbd {
   min-width: 120px;
 }
 
-.photo-tile--focused {
-  border-color: #8a8a92;
-}
-
 .photo-tile--selected {
   border-color: var(--like);
 }
@@ -1291,7 +1339,6 @@ kbd {
 }
 
 .photo-tile:hover .photo-check,
-.photo-tile--focused .photo-check,
 .photo-tile--selected .photo-check {
   opacity: 1;
   pointer-events: auto;

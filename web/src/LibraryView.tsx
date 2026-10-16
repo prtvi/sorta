@@ -27,6 +27,7 @@ import {
   toastToneForBucket,
 } from './api'
 import { useKeyboard } from './hooks/useKeyboard'
+import { packJustifiedRows } from './justifiedLayout'
 import ZoomableImage from './ZoomableImage'
 
 type Props = {
@@ -91,7 +92,8 @@ function exifLines(meta: ExifMetadata | null): string[] {
   )
 }
 
-const GRID_COLS = 8
+const JUSTIFIED_GAP = 0.5
+const JUSTIFIED_ROW_HEIGHT = 190
 
 type SearchHit = { photo: Photo; bucket: Bucket }
 
@@ -156,6 +158,9 @@ export default function LibraryView({
   const toolsMenuRef = useRef<HTMLDivElement>(null)
   const focusedTileRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const justifiedRef = useRef<HTMLDivElement | null>(null)
+  const [aspectRatios, setAspectRatios] = useState<Map<string, number>>(() => new Map())
+  const [containerWidth, setContainerWidth] = useState(0)
 
   const applyCountsFromStats = useCallback(
     (fs: Stats) => {
@@ -772,14 +777,51 @@ export default function LibraryView({
 
   const gridItems = visibleBursts.length > 0 ? visibleSingles : visiblePhotos
 
+  useEffect(() => {
+    const el = justifiedRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0
+      if (w > 0) setContainerWidth(w)
+    })
+    ro.observe(el)
+    setContainerWidth(el.clientWidth)
+    return () => ro.disconnect()
+  }, [gridItems.length, bucket, searchOpen])
+
+  const justifiedRows = useMemo(() => {
+    const items = gridItems.map((p) => ({
+      name: p.name,
+      aspectRatio: aspectRatios.get(p.name) ?? 1,
+    }))
+    return packJustifiedRows(items, containerWidth, JUSTIFIED_ROW_HEIGHT, JUSTIFIED_GAP)
+  }, [gridItems, aspectRatios, containerWidth])
+
+  const gridByName = useMemo(() => new Map(gridItems.map((p) => [p.name, p])), [gridItems])
+  const photoIndexByName = useMemo(
+    () => new Map(visiblePhotos.map((p, i) => [p.name, i])),
+    [visiblePhotos],
+  )
+
+  const noteThumbAspect = useCallback((name: string, img: HTMLImageElement) => {
+    const { naturalWidth: w, naturalHeight: h } = img
+    if (w <= 0 || h <= 0) return
+    const ar = w / h
+    setAspectRatios((prev) => {
+      if (prev.get(name) === ar) return prev
+      const next = new Map(prev)
+      next.set(name, ar)
+      return next
+    })
+  }, [])
+
   const selectRowContaining = useCallback(
     (name: string) => {
-      const idx = gridItems.findIndex((p) => p.name === name)
-      if (idx < 0) return
-      const start = Math.floor(idx / GRID_COLS) * GRID_COLS
-      toggleSelectNames(gridItems.slice(start, start + GRID_COLS).map((p) => p.name))
+      const row = justifiedRows.find((r) => r.some((t) => t.name === name))
+      if (!row) return
+      toggleSelectNames(row.map((t) => t.name))
     },
-    [gridItems, toggleSelectNames],
+    [justifiedRows, toggleSelectNames],
   )
 
   const onTileClick = (index: number, e: React.MouseEvent) => {
@@ -992,26 +1034,20 @@ export default function LibraryView({
       }
       if (visiblePhotos.length === 0) return
 
-      if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        setFocused((f) => Math.min(visiblePhotos.length - 1, f + 1))
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        setFocused((f) => Math.max(0, f - 1))
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setFocused((f) => Math.min(visiblePhotos.length - 1, f + GRID_COLS))
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setFocused((f) => Math.max(0, f - GRID_COLS))
-      } else if (e.key === ' ') {
+      // Grid browsing is mouse-only; arrow keys only navigate when a viewer is open.
+      if (
+        e.key === 'ArrowRight' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowUp'
+      ) {
+        return
+      }
+
+      if (e.key === ' ') {
         e.preventDefault()
         const p = visiblePhotos[focused]
         if (p) toggleSelect(p.name)
-      } else if (e.key === 'r' || e.key === 'R') {
-        e.preventDefault()
-        const p = visiblePhotos[focused]
-        if (p) selectRowContaining(p.name)
       } else if (e.key === 'Enter') {
         e.preventDefault()
         const p = visiblePhotos[focused]
@@ -1048,7 +1084,7 @@ export default function LibraryView({
         setSelected(new Set(visiblePhotos.map((p) => p.name)))
       }
     },
-    [visiblePhotos, visibleBursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, searchOpen, closeSearch, selectRowContaining, requestMove, runUndo, onToggleFullscreen, revealInFinder, toggleStar],
+    [visiblePhotos, visibleBursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, searchOpen, closeSearch, requestMove, runUndo, onToggleFullscreen, revealInFinder, toggleStar],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -1199,7 +1235,7 @@ export default function LibraryView({
           </div>
           <div className="library-toolbar-actions">
             {visiblePhotos.length > 0 && (
-              <span className="muted library-toolbar-hint">⌥-click / R select row</span>
+              <span className="muted library-toolbar-hint">⌥-click select row</span>
             )}
             <button
               type="button"
@@ -1492,7 +1528,7 @@ export default function LibraryView({
                           <div
                             key={p.name}
                             ref={focused === i ? focusedTileRef : undefined}
-                            className={`photo-tile photo-tile--burst${showNames ? ' photo-tile--named' : ''}${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                            className={`photo-tile photo-tile--burst${showNames ? ' photo-tile--named' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
                             title={p.name}
                             draggable
                             onDragStart={(e) => onDragStart(e, p.name)}
@@ -1540,40 +1576,54 @@ export default function LibraryView({
               <div className="singles-section">
                 {visibleBursts.length > 0 && <h3 className="section-title">Singles</h3>}
                 <div
-                  className="photo-grid photo-grid--fixed"
-                  style={{ ['--grid-cols' as string]: String(GRID_COLS) }}
+                  ref={justifiedRef}
+                  className="photo-justified"
+                  style={{ ['--justified-gap' as string]: `${JUSTIFIED_GAP}px` }}
                 >
-                  {gridItems.map((p) => {
-                    const i = visiblePhotos.findIndex((x) => x.name === p.name)
-                    return (
-                      <div
-                        key={p.name}
-                        ref={focused === i ? focusedTileRef : undefined}
-                        className={`photo-tile${showNames ? ' photo-tile--named' : ''}${focused === i ? ' photo-tile--focused' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
-                        title={p.name}
-                        draggable
-                        onDragStart={(e) => onDragStart(e, p.name)}
-                        onClick={(e) => onTileClick(i, e)}
-                      >
-                        <div className="photo-tile-media">
-                          <label className="photo-check" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={selected.has(p.name)}
-                              onChange={() => toggleSelect(p.name)}
-                            />
-                          </label>
-                          <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
-                          {starred.has(p.name) && (
-                            <span className="photo-star-badge" title="Favourited" aria-label="Favourited">
-                              ★
-                            </span>
-                          )}
-                        </div>
-                        {showNames && <span className="photo-tile-name">{p.name}</span>}
-                      </div>
-                    )
-                  })}
+                  {justifiedRows.map((row, rowIdx) => (
+                    <div key={rowIdx} className="photo-justified-row">
+                      {row.map((tile) => {
+                        const p = gridByName.get(tile.name)
+                        if (!p) return null
+                        const i = photoIndexByName.get(p.name) ?? -1
+                        return (
+                          <div
+                            key={p.name}
+                            ref={focused === i ? focusedTileRef : undefined}
+                            className={`photo-tile photo-tile--justified${showNames ? ' photo-tile--named' : ''}${selected.has(p.name) ? ' photo-tile--selected' : ''}`}
+                            style={{ width: tile.width, height: tile.height }}
+                            title={p.name}
+                            draggable
+                            onDragStart={(e) => onDragStart(e, p.name)}
+                            onClick={(e) => onTileClick(i, e)}
+                          >
+                            <div className="photo-tile-media">
+                              <label className="photo-check" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected.has(p.name)}
+                                  onChange={() => toggleSelect(p.name)}
+                                />
+                              </label>
+                              <img
+                                src={imageUrl(p.url, 'thumb')}
+                                alt={p.name}
+                                loading="lazy"
+                                draggable={false}
+                                onLoad={(e) => noteThumbAspect(p.name, e.currentTarget)}
+                              />
+                              {starred.has(p.name) && (
+                                <span className="photo-star-badge" title="Favourited" aria-label="Favourited">
+                                  ★
+                                </span>
+                              )}
+                              {showNames && <span className="photo-tile-name">{p.name}</span>}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
