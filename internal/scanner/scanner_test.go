@@ -51,6 +51,67 @@ func TestScanRootFindsSupportedFormats(t *testing.T) {
 	}
 }
 
+func TestBytesInDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.jpg"), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.ARW"), []byte("rawraw"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "liked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "liked", "nested.jpg"), []byte("xxxxxxxxxx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := scanner.BytesInDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := int64(5 + 6)
+	if got != want {
+		t.Fatalf("BytesInDir=%d want %d", got, want)
+	}
+
+	missing, err := scanner.BytesInDir(filepath.Join(dir, "nope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != 0 {
+		t.Fatalf("missing dir size=%d want 0", missing)
+	}
+}
+
+func TestBytesInTree(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.jpg"), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "liked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "liked", "nested.jpg"), []byte("xxxxxxxxxx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".sorta", "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".sorta", "cache", "x.jpg"), []byte("cached!!!!"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := scanner.BytesInTree(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := int64(5 + 10) // root + liked; .sorta skipped
+	if got != want {
+		t.Fatalf("BytesInTree=%d want %d", got, want)
+	}
+}
+
 func TestIsSupportedImage(t *testing.T) {
 	cases := map[string]bool{
 		"x.jpg":  true,

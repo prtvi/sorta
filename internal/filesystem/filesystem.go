@@ -309,6 +309,21 @@ func (s *Store) ListLibraryBucket(bucket models.Bucket) ([]models.Photo, error) 
 	return scanner.ScanBucketDir(dir, prefix)
 }
 
+// BucketDirSize returns the total byte size of regular files in a bucket directory
+// (non-recursive; sidecars like .ARW are included). For root/Unclassified this is
+// only files in the working root — not classification subdirs. Cull uses the
+// cumulative tree size via CollectStats.RootDirSizeBytes instead.
+func (s *Store) BucketDirSize(bucket models.Bucket) (int64, error) {
+	if !bucket.LibraryBucket() {
+		return 0, fmt.Errorf("invalid library bucket")
+	}
+	dir, err := s.BucketDir(bucket)
+	if err != nil {
+		return 0, err
+	}
+	return scanner.BytesInDir(dir)
+}
+
 // UndoMove restores a previously moved file to its original path.
 // If the original name is taken, a unique name is chosen.
 // Companion sidecars recorded on the action are restored first.
@@ -395,15 +410,20 @@ func (s *Store) CollectStats() (models.Stats, error) {
 	if err != nil {
 		return models.Stats{}, err
 	}
+	rootSize, err := scanner.BytesInTree(s.Root)
+	if err != nil {
+		return models.Stats{}, err
+	}
 	return models.Stats{
-		Total:       remaining + liked + shortlisted + posting + sharing + disliked + posted,
-		Remaining:   remaining,
-		Root:        remaining,
-		Liked:       liked,
-		Shortlisted: shortlisted,
-		Posting:     posting,
-		Sharing:     sharing,
-		Disliked:    disliked,
-		Posted:      posted,
+		Total:            remaining + liked + shortlisted + posting + sharing + disliked + posted,
+		Remaining:        remaining,
+		Root:             remaining,
+		Liked:            liked,
+		Shortlisted:      shortlisted,
+		Posting:          posting,
+		Sharing:          sharing,
+		Disliked:         disliked,
+		Posted:           posted,
+		RootDirSizeBytes: rootSize,
 	}, nil
 }

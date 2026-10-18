@@ -150,13 +150,18 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	if stats, err := s.Store.CollectStats(); err == nil {
 		statsPtr = &stats
 	}
+	var dirSize int64
+	if n, err := s.Store.BucketDirSize(bucket); err == nil {
+		dirSize = n
+	}
 
 	writeJSON(w, http.StatusOK, models.LibraryResponse{
-		Bucket:  bucket,
-		Photos:  photos,
-		Bursts:  bursts,
-		Singles: singles,
-		Stats:   statsPtr,
+		Bucket:       bucket,
+		Photos:       photos,
+		Bursts:       bursts,
+		Singles:      singles,
+		Stats:        statsPtr,
+		DirSizeBytes: dirSize,
 	})
 }
 
@@ -195,13 +200,18 @@ func (s *Server) handleDetectBursts(w http.ResponseWriter, r *http.Request) {
 	if stats, err := s.Store.CollectStats(); err == nil {
 		statsPtr = &stats
 	}
+	var dirSize int64
+	if n, err := s.Store.BucketDirSize(bucket); err == nil {
+		dirSize = n
+	}
 
 	writeJSON(w, http.StatusOK, models.LibraryResponse{
-		Bucket:  bucket,
-		Photos:  photos,
-		Bursts:  bursts,
-		Singles: singles,
-		Stats:   statsPtr,
+		Bucket:       bucket,
+		Photos:       photos,
+		Bursts:       bursts,
+		Singles:      singles,
+		Stats:        statsPtr,
+		DirSizeBytes: dirSize,
 	})
 }
 

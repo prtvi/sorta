@@ -80,6 +80,13 @@ kbd {
   font-family: var(--mono);
   font-size: 0.95rem;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.progress-sep {
+  opacity: 0.55;
 }
 
 .icon-btn {

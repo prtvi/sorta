@@ -37,6 +37,7 @@ export interface Stats {
   sharing: number
   disliked: number
   posted: number
+  root_dir_size_bytes: number
 }
 
 /** Posted is Finder-managed; Sorta never moves files in or out. */
@@ -75,6 +76,7 @@ export interface LibraryResponse {
   bursts: BurstGroup[]
   singles: Photo[]
   stats?: Stats
+  dir_size_bytes: number
 }
 
 export interface ActionResponse {

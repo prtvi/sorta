@@ -27,6 +27,7 @@ import {
   type ToastTone,
   toastToneForBucket,
 } from './api'
+import { formatDirSize } from './format'
 import { useKeyboard } from './hooks/useKeyboard'
 import { packJustifiedRows } from './justifiedLayout'
 import ZoomableImage from './ZoomableImage'
@@ -63,6 +64,7 @@ function bucketLabel(b: Bucket) {
   if (b === 'root') return 'Unclassified'
   return b.charAt(0).toUpperCase() + b.slice(1)
 }
+
 
 function burstContaining(groups: BurstGroup[], name: string): BurstGroup | undefined {
   return groups.find((g) => g.photos.some((p) => p.name === name))
@@ -118,6 +120,7 @@ export default function LibraryView({
     disliked: 0,
     posted: 0,
   })
+  const [dirSizeBytes, setDirSizeBytes] = useState<number | null>(null)
   const [focused, setFocused] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewer, setViewer] = useState<Photo | null>(null)
@@ -181,6 +184,7 @@ export default function LibraryView({
       setPhotos(data.photos)
       setBursts(data.bursts ?? [])
       setSingles(data.singles ?? data.photos)
+      setDirSizeBytes(typeof data.dir_size_bytes === 'number' ? data.dir_size_bytes : null)
       setSelected(new Set())
       const list = starredOnly ? data.photos.filter((p) => starred.has(p.name)) : data.photos
       let idx = 0
@@ -201,6 +205,16 @@ export default function LibraryView({
       return
     }
     for (const b of buckets) cacheRef.current.delete(b)
+  }, [])
+
+  const refreshDirSize = useCallback(async (b: Bucket) => {
+    try {
+      const data = await fetchLibrary(b)
+      cacheRef.current.set(b, data)
+      setDirSizeBytes(typeof data.dir_size_bytes === 'number' ? data.dir_size_bytes : null)
+    } catch {
+      /* keep prior size */
+    }
   }, [])
 
   const prefetchOthers = useCallback((current: Bucket) => {
@@ -533,7 +547,7 @@ export default function LibraryView({
             onToast(`Moved ${res.movedCount} photos to ${bucketLabel(to)}`, toastToneForBucket(to))
           }
         }
-        await refreshCounts()
+        await Promise.all([refreshCounts(), refreshDirSize(bucket)])
         shownAt.current = Date.now()
       } catch (e) {
         onToast(e instanceof Error ? e.message : 'Move failed', 'error')
@@ -542,7 +556,7 @@ export default function LibraryView({
         setConfirm(null)
       }
     },
-    [bucket, busy, advanceViewerAfterRemove, onStats, onToast, refreshCounts, invalidateCache],
+    [bucket, busy, advanceViewerAfterRemove, onStats, onToast, refreshCounts, refreshDirSize, invalidateCache],
   )
 
   const requestMove = useCallback(
@@ -740,7 +754,7 @@ export default function LibraryView({
         setSelected(new Set())
         invalidateCache()
         onToast(`Kept ${keepName} · discarded ${Math.max(0, res.moved.length - 1)}`, 'liked')
-        await refreshCounts()
+        await Promise.all([refreshCounts(), refreshDirSize(bucket)])
         const s = await fetchStats()
         onStats(s.filesystem, s.session)
       } catch (e) {
@@ -749,7 +763,7 @@ export default function LibraryView({
         setBusy(false)
       }
     },
-    [bucket, busy, detecting, advanceViewerAfterRemove, onToast, onStats, refreshCounts, invalidateCache],
+    [bucket, busy, detecting, advanceViewerAfterRemove, onToast, onStats, refreshCounts, refreshDirSize, invalidateCache],
   )
 
   const toggleSelect = (name: string) => {
@@ -1151,6 +1165,7 @@ export default function LibraryView({
               {bucketLabel(bucket)}
               {bucket === 'posted' ? ' · Finder-managed' : ''} ·{' '}
               {starredOnly ? `${visiblePhotos.length} of ${photos.length}` : photos.length}
+              {dirSizeBytes !== null ? ` · ${formatDirSize(dirSizeBytes)}` : ''}
               {visibleBursts.length > 0
                 ? ` · ${visibleBursts.length} burst${visibleBursts.length === 1 ? '' : 's'}`
                 : ''}

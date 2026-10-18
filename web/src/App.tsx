@@ -17,6 +17,7 @@ import {
   type ToastTone,
 } from './api'
 import CompareMode from './CompareMode'
+import { formatDirSize } from './format'
 import LibraryView from './LibraryView'
 import ZoomableImage from './ZoomableImage'
 import { useFullscreen } from './hooks/useFullscreen'
@@ -37,6 +38,7 @@ const emptyStats: Stats = {
   disliked: 0,
   posted: 0,
   sharing: 0,
+  root_dir_size_bytes: 0,
 }
 
 const emptySession: SessionStats = {
@@ -438,7 +440,9 @@ export default function App() {
           </div>
         )}
         {topMode === 'cull' && (status === 'ready' || status === 'done') && (
-          <div className="progress">
+          <div className="progress" title="Unclassified (root) folder size · progress">
+            {formatDirSize(stats.root_dir_size_bytes ?? 0)}
+            <span className="progress-sep">·</span>
             {processed} / {stats.total}
           </div>
         )}

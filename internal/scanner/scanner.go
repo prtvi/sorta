@@ -105,6 +105,63 @@ func CountInDir(dir string) (int, error) {
 	return count, nil
 }
 
+// BytesInDir sums the size of all regular files directly inside dir (non-recursive).
+// Subdirectories (e.g. classification folders under root) are skipped.
+func BytesInDir(dir string) (int64, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var total int64
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		total += info.Size()
+	}
+	return total, nil
+}
+
+// BytesInTree sums the size of all regular files under dir (recursive).
+// The .sorta cache directory is skipped.
+func BytesInTree(dir string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			if path != dir && strings.EqualFold(d.Name(), ".sorta") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return total, nil
+}
+
 // IsSkipDir reports whether name is a classification subdirectory.
 func IsSkipDir(name string) bool {
 	return skipDirs[strings.ToLower(name)]

@@ -120,11 +120,12 @@ type PhotosResponse struct {
 
 // LibraryResponse is GET /api/library/:bucket.
 type LibraryResponse struct {
-	Bucket  Bucket       `json:"bucket"`
-	Photos  []Photo      `json:"photos"`
-	Bursts  []BurstGroup `json:"bursts"`
-	Singles []Photo      `json:"singles"`
-	Stats   *Stats       `json:"stats,omitempty"`
+	Bucket       Bucket       `json:"bucket"`
+	Photos       []Photo      `json:"photos"`
+	Bursts       []BurstGroup `json:"bursts"`
+	Singles      []Photo      `json:"singles"`
+	Stats        *Stats       `json:"stats,omitempty"`
+	DirSizeBytes int64        `json:"dir_size_bytes"`
 }
 
 // BurstGroup is a cluster of photos detected by capture time.
@@ -136,15 +137,16 @@ type BurstGroup struct {
 
 // Stats reflects filesystem classification counts.
 type Stats struct {
-	Total       int `json:"total"`
-	Remaining   int `json:"remaining"` // unclassified (root); kept for Cull UI
-	Root        int `json:"root"`
-	Liked       int `json:"liked"`
-	Shortlisted int `json:"shortlisted"`
-	Posting     int `json:"posting"`
-	Sharing     int `json:"sharing"`
-	Disliked    int `json:"disliked"`
-	Posted      int `json:"posted"`
+	Total            int   `json:"total"`
+	Remaining        int   `json:"remaining"` // unclassified (root); kept for Cull UI
+	Root             int   `json:"root"`
+	Liked            int   `json:"liked"`
+	Shortlisted      int   `json:"shortlisted"`
+	Posting          int   `json:"posting"`
+	Sharing          int   `json:"sharing"`
+	Disliked         int   `json:"disliked"`
+	Posted           int   `json:"posted"`
+	RootDirSizeBytes int64 `json:"root_dir_size_bytes"`
 }
 
 // SessionStats tracks actions in the current process only.
