@@ -15,9 +15,11 @@ import (
 
 // Server holds HTTP handlers, undo stack, and in-process session stats.
 type Server struct {
-	Store *filesystem.Store
-	mu    sync.Mutex
-	undo  []models.UndoEntry
+	Store   *filesystem.Store
+	storeMu sync.RWMutex
+
+	mu   sync.Mutex
+	undo []models.UndoEntry
 
 	sessionMu     sync.Mutex
 	session       models.SessionStats
@@ -47,6 +49,8 @@ func New(store *filesystem.Store) *Server {
 // Handler returns the root mux for the application.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/config", s.handleGetConfig)
+	mux.HandleFunc("PUT /api/config", s.handlePutConfig)
 	mux.HandleFunc("GET /api/photos", s.handleListPhotos)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/session", s.handleGetSession)
@@ -66,7 +70,42 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/export", s.handleExport)
 	mux.HandleFunc("GET /photos/{filename}", s.handleServePhoto)
 	mux.HandleFunc("GET /photos/{bucket}/{filename}", s.handleServeBucketPhoto)
-	return withLogging(mux)
+	return withLogging(s.withRootRequired(mux))
+}
+
+// Configured reports whether a working directory has been set.
+func (s *Server) Configured() bool {
+	s.storeMu.RLock()
+	defer s.storeMu.RUnlock()
+	return s.Store != nil
+}
+
+// SetStore assigns the working-directory store. Returns false if already set.
+func (s *Server) SetStore(store *filesystem.Store) bool {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	if s.Store != nil {
+		return false
+	}
+	s.Store = store
+	return true
+}
+
+func (s *Server) withRootRequired(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/api/config" || strings.HasPrefix(path, "/api/config/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/photos/") {
+			if !s.Configured() {
+				writeError(w, http.StatusServiceUnavailable, "ROOT_NOT_SET", "Photo directory not configured")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

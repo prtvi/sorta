@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   classifyPhoto,
+  fetchConfig,
   fetchExif,
   fetchPhotos,
   fetchSession,
   fetchStats,
   imageUrl,
   saveSession,
+  setConfigPath,
   undoLast,
   type Bucket,
   type ExifMetadata,
@@ -86,6 +89,10 @@ export default function App() {
   const [compareBucket, setCompareBucket] = useState<Bucket>('liked')
   const [libBucket, setLibBucket] = useState<Bucket>('liked')
   const [libPhoto, setLibPhoto] = useState<string | undefined>()
+  const [needsPath, setNeedsPath] = useState(false)
+  const [pathInput, setPathInput] = useState('')
+  const [pathBusy, setPathBusy] = useState(false)
+  const [pathError, setPathError] = useState<string | null>(null)
 
   const busyRef = useRef(false)
   const photosRef = useRef(photos)
@@ -149,40 +156,69 @@ export default function App() {
     }
   }, [persistSession, refreshSessionStats])
 
+  const bootApp = useCallback(async () => {
+    let resumePhoto: string | undefined
+    let resumeMode: TopMode = 'cull'
+    let resumeBucket: Bucket = 'liked'
+    try {
+      const sess = await fetchSession()
+      if (sess.mode === 'library') {
+        resumeMode = 'library'
+        if (
+          sess.lastBucket === 'liked' ||
+          sess.lastBucket === 'shortlisted' ||
+          sess.lastBucket === 'posting' ||
+          sess.lastBucket === 'sharing' ||
+          sess.lastBucket === 'disliked' ||
+          sess.lastBucket === 'posted' ||
+          sess.lastBucket === 'root'
+        ) {
+          resumeBucket = sess.lastBucket
+        }
+        resumePhoto = sess.lastPhoto || undefined
+      } else if (sess.lastPhoto) {
+        resumePhoto = sess.lastPhoto
+      }
+    } catch {
+      /* ignore */
+    }
+    setTopMode(resumeMode)
+    setLibBucket(resumeMode === 'library' ? resumeBucket : 'root')
+    setLibPhoto(resumePhoto)
+    if (resumeMode === 'cull') await loadCull(resumePhoto)
+    else setStatus('ready')
+  }, [loadCull])
+
   useEffect(() => {
     void (async () => {
-      let resumePhoto: string | undefined
-      let resumeMode: TopMode = 'cull'
-      let resumeBucket: Bucket = 'liked'
       try {
-        const sess = await fetchSession()
-        if (sess.mode === 'library') {
-          resumeMode = 'library'
-          if (
-            sess.lastBucket === 'liked' ||
-            sess.lastBucket === 'shortlisted' ||
-            sess.lastBucket === 'posting' ||
-            sess.lastBucket === 'sharing' ||
-            sess.lastBucket === 'disliked' ||
-            sess.lastBucket === 'posted' ||
-            sess.lastBucket === 'root'
-          ) {
-            resumeBucket = sess.lastBucket
-          }
-          resumePhoto = sess.lastPhoto || undefined
-        } else if (sess.lastPhoto) {
-          resumePhoto = sess.lastPhoto
+        const cfg = await fetchConfig()
+        if (!cfg.configured) {
+          setNeedsPath(true)
+          return
         }
       } catch {
-        /* ignore */
+        /* treat as already configured — fall through to normal boot */
       }
-      setTopMode(resumeMode)
-      setLibBucket(resumeMode === 'library' ? resumeBucket : 'root')
-      setLibPhoto(resumePhoto)
-      if (resumeMode === 'cull') await loadCull(resumePhoto)
-      else setStatus('ready')
+      await bootApp()
     })()
-  }, [loadCull])
+  }, [bootApp])
+
+  const submitPath = useCallback(async () => {
+    const path = pathInput.trim()
+    if (!path || pathBusy) return
+    setPathBusy(true)
+    setPathError(null)
+    try {
+      await setConfigPath(path)
+      setNeedsPath(false)
+      await bootApp()
+    } catch (e) {
+      setPathError(e instanceof Error ? e.message : 'Could not use that folder')
+    } finally {
+      setPathBusy(false)
+    }
+  }, [pathInput, pathBusy, bootApp])
 
   const current = photos[currentIndex]
 
@@ -657,6 +693,49 @@ export default function App() {
           {toast.message}
         </div>
       )}
+
+      {needsPath &&
+        createPortal(
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="path-dialog-title">
+            <div className="confirm-card export-card" onClick={(e) => e.stopPropagation()}>
+              <h3 id="path-dialog-title" className="export-title">
+                Choose photo folder
+              </h3>
+              <p className="muted">
+                Enter the full path to the folder you want to cull. Sorta will create liked/, shortlisted/,
+                posting/, sharing/, disliked/, and posted/ inside it.
+              </p>
+              <label className="export-label" htmlFor="photo-folder-path">
+                Folder path
+              </label>
+              <input
+                id="photo-folder-path"
+                className="export-input"
+                type="text"
+                value={pathInput}
+                disabled={pathBusy}
+                placeholder="~/Pictures/vacation"
+                autoFocus
+                onChange={(e) => setPathInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !pathBusy) void submitPath()
+                }}
+              />
+              {pathError ? <p className="path-dialog-error">{pathError}</p> : null}
+              <div className="actions">
+                <button
+                  type="button"
+                  className="btn btn--like"
+                  disabled={pathBusy || !pathInput.trim()}
+                  onClick={() => void submitPath()}
+                >
+                  {pathBusy ? 'Opening…' : 'Open folder'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

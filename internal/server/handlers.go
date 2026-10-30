@@ -20,6 +20,49 @@ import (
 	"github.com/prtvi/sorta/internal/session"
 )
 
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	s.storeMu.RLock()
+	defer s.storeMu.RUnlock()
+	if s.Store == nil {
+		writeJSON(w, http.StatusOK, models.ConfigResponse{Configured: false})
+		return
+	}
+	writeJSON(w, http.StatusOK, models.ConfigResponse{
+		Configured: true,
+		Root:       s.Store.Root,
+	})
+}
+
+func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Could not read request body")
+		return
+	}
+	var req models.ConfigRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid JSON body")
+		return
+	}
+	store, err := filesystem.NewStore(req.Path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_PATH", err.Error())
+		return
+	}
+	if err := store.EnsureClassificationDirs(); err != nil {
+		writeError(w, http.StatusInternalServerError, "SETUP_FAILED", "Could not create classification folders")
+		return
+	}
+	if !s.SetStore(store) {
+		writeError(w, http.StatusConflict, "ALREADY_CONFIGURED", "Photo directory is already set")
+		return
+	}
+	writeJSON(w, http.StatusOK, models.ConfigResponse{
+		Configured: true,
+		Root:       store.Root,
+	})
+}
+
 func (s *Server) handleListPhotos(w http.ResponseWriter, r *http.Request) {
 	// Cull mode: plain scan only — burst detection lives in Library.
 	photos, err := scanner.ScanRoot(s.Store.Root)

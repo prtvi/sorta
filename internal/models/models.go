@@ -267,6 +267,17 @@ type ExportResponse struct {
 	Errors      []string `json:"errors,omitempty"`
 }
 
+// ConfigResponse is GET /api/config.
+type ConfigResponse struct {
+	Configured bool   `json:"configured"`
+	Root       string `json:"root,omitempty"`
+}
+
+// ConfigRequest is PUT /api/config.
+type ConfigRequest struct {
+	Path string `json:"path"`
+}
+
 // ErrorBody is the nested error object in API failures.
 type ErrorBody struct {
 	Code    string `json:"code"`

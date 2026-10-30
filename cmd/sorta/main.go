@@ -28,24 +28,28 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "HTTP listen address (localhost only by default)")
 	noOpen := flag.Bool("no-open", false, "Do not open the browser automatically")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: sorta [flags] <photo-directory>\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: sorta [flags] [photo-directory]\n\n")
 		fmt.Fprintf(os.Stderr, "Local-first photo culling. Classifies photos into liked/, shortlisted/, posting/, sharing/, disliked/. Posted finals live in posted/ (Finder-managed).\n\n")
+		fmt.Fprintf(os.Stderr, "If photo-directory is omitted, the UI prompts for a folder path on first open.\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	if flag.NArg() != 1 {
+	if flag.NArg() > 1 {
 		flag.Usage()
 		os.Exit(2)
 	}
 
-	root := flag.Arg(0)
-	store, err := filesystem.NewStore(root)
-	if err != nil {
-		log.Fatalf("invalid directory: %v", err)
-	}
-	if err := store.EnsureClassificationDirs(); err != nil {
-		log.Fatalf("create classification dirs: %v", err)
+	var store *filesystem.Store
+	if flag.NArg() == 1 {
+		var err error
+		store, err = filesystem.NewStore(flag.Arg(0))
+		if err != nil {
+			log.Fatalf("invalid directory: %v", err)
+		}
+		if err := store.EnsureClassificationDirs(); err != nil {
+			log.Fatalf("create classification dirs: %v", err)
+		}
 	}
 
 	api := server.New(store).Handler()
@@ -67,7 +71,11 @@ func main() {
 
 	url := fmt.Sprintf("http://%s", listener.Addr().String())
 	log.Printf("Sorta ready")
-	log.Printf("Working directory: %s", store.Root)
+	if store != nil {
+		log.Printf("Working directory: %s", store.Root)
+	} else {
+		log.Printf("Working directory: (not set — choose a folder in the UI)")
+	}
 	log.Printf("Listening on %s", url)
 
 	if !*noOpen {

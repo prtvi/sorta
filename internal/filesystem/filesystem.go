@@ -18,11 +18,35 @@ type Store struct {
 	Root string
 }
 
+// ExpandPath resolves ~ and returns an absolute path.
+func ExpandPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if strings.HasPrefix(path, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home: %w", err)
+		}
+		if path == "~" {
+			path = home
+		} else if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	return abs, nil
+}
+
 // NewStore validates root and returns a Store.
 func NewStore(root string) (*Store, error) {
-	abs, err := filepath.Abs(root)
+	abs, err := ExpandPath(root)
 	if err != nil {
-		return nil, fmt.Errorf("resolve path: %w", err)
+		return nil, err
 	}
 	info, err := os.Stat(abs)
 	if err != nil {

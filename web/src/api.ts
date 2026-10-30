@@ -141,6 +141,11 @@ export interface SessionState {
   lastBucket: string
 }
 
+export interface ConfigResponse {
+  configured: boolean
+  root?: string
+}
+
 export interface ApiError {
   success: false
   error: { code: string; message: string }
@@ -158,6 +163,20 @@ async function parseJSON<T>(res: Response): Promise<T> {
 function withDecision(ms?: number): HeadersInit {
   if (!ms || ms <= 0) return {}
   return { 'X-Decision-Ms': String(Math.round(ms)) }
+}
+
+export async function fetchConfig(): Promise<ConfigResponse> {
+  const res = await fetch('/api/config')
+  return parseJSON<ConfigResponse>(res)
+}
+
+export async function setConfigPath(path: string): Promise<ConfigResponse> {
+  const res = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  return parseJSON<ConfigResponse>(res)
 }
 
 export async function fetchPhotos(): Promise<PhotosResponse> {

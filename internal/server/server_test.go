@@ -448,3 +448,70 @@ func TestFavoritesStar(t *testing.T) {
 		t.Fatalf("missing photo status %d", rr.Code)
 	}
 }
+
+func TestConfigDeferredRoot(t *testing.T) {
+	srv := server.New(nil)
+	h := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get config %d", rr.Code)
+	}
+	var cfg models.ConfigResponse
+	if err := json.NewDecoder(rr.Body).Decode(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Configured {
+		t.Fatal("expected unconfigured")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/photos", nil)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("photos without root: %d", rr.Code)
+	}
+
+	dir := t.TempDir()
+	body := bytes.NewBufferString(`{"path":` + jsonQuote(dir) + `}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/config", body)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("put config %d: %s", rr.Code, rr.Body.String())
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Configured || cfg.Root == "" {
+		t.Fatalf("expected configured root, got %+v", cfg)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "liked")); err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/photos", nil)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("photos after config %d", rr.Code)
+	}
+
+	body = bytes.NewBufferString(`{"path":` + jsonQuote(t.TempDir()) + `}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/config", body)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("reconfigure status %d", rr.Code)
+	}
+}
+
+func jsonQuote(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
