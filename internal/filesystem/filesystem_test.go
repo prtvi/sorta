@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/prtvi/sorta/internal/filesystem"
 	"github.com/prtvi/sorta/internal/models"
@@ -402,6 +403,9 @@ func TestListLibraryBucket(t *testing.T) {
 	_ = store.EnsureClassificationDirs()
 	_ = os.WriteFile(filepath.Join(dir, "liked", "z.jpg"), []byte("z"), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "liked", "a.jpg"), []byte("a"), 0o644)
+	same := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	_ = os.Chtimes(filepath.Join(dir, "liked", "z.jpg"), same, same)
+	_ = os.Chtimes(filepath.Join(dir, "liked", "a.jpg"), same, same)
 	photos, err := store.ListLibraryBucket(models.BucketLiked)
 	if err != nil {
 		t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/prtvi/sorta/internal/scanner"
 )
@@ -31,6 +32,13 @@ func TestScanRootFindsSupportedFormats(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "subdir", "deep.jpg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Same mod times → name tiebreaker (alphabetical) when EXIF is absent.
+	same := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	for _, name := range []string{"a.JPG", "b.jpeg", "c.PNG", "d.webp", "e.HEIC", "f.heif"} {
+		if err := os.Chtimes(filepath.Join(dir, name), same, same); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	photos, err := scanner.ScanRoot(dir)
 	if err != nil {
@@ -39,7 +47,6 @@ func TestScanRootFindsSupportedFormats(t *testing.T) {
 	if len(photos) != 6 {
 		t.Fatalf("expected 6 photos, got %d: %+v", len(photos), photos)
 	}
-	// Deterministic alphabetical order.
 	want := []string{"a.JPG", "b.jpeg", "c.PNG", "d.webp", "e.HEIC", "f.heif"}
 	for i, w := range want {
 		if photos[i].Name != w {
@@ -47,6 +54,41 @@ func TestScanRootFindsSupportedFormats(t *testing.T) {
 		}
 		if photos[i].URL != "/photos/"+w {
 			t.Errorf("url=%q", photos[i].URL)
+		}
+	}
+}
+
+func TestScanRootOrdersByCreationTime(t *testing.T) {
+	dir := t.TempDir()
+	files := []struct {
+		name string
+		at   time.Time
+	}{
+		{"newer.jpg", time.Date(2024, 6, 2, 10, 0, 0, 0, time.UTC)},
+		{"older.jpg", time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)},
+		{"mid.jpg", time.Date(2024, 6, 1, 15, 0, 0, 0, time.UTC)},
+	}
+	for _, f := range files {
+		path := filepath.Join(dir, f.name)
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, f.at, f.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	photos, err := scanner.ScanRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"older.jpg", "mid.jpg", "newer.jpg"}
+	if len(photos) != len(want) {
+		t.Fatalf("got %d photos, want %d", len(photos), len(want))
+	}
+	for i, w := range want {
+		if photos[i].Name != w {
+			t.Errorf("photos[%d]=%q want %q (order %+v)", i, photos[i].Name, w, photos)
 		}
 	}
 }
