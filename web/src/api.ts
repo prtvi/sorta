@@ -1,4 +1,4 @@
-export type PhotoAction = 'liked' | 'shortlisted' | 'disliked' | 'sharing'
+export type PhotoAction = 'liked' | 'shortlisted' | 'posting' | 'disliked' | 'sharing'
 export type Bucket = 'root' | 'liked' | 'shortlisted' | 'posting' | 'sharing' | 'disliked' | 'posted'
 export type AppMode = 'cull' | 'library' | 'compare'
 export type ImageSize = 'view' | 'thumb'
@@ -43,6 +43,13 @@ export interface Stats {
 /** Posted is Finder-managed; Sorta never moves files in or out. */
 export function bucketAllowsMoves(b: Bucket): boolean {
   return b !== 'posted'
+}
+
+export const POSTED_READONLY_MSG = 'Posted is Finder-managed — files cannot be moved in or out'
+
+export function bucketLabel(b: Bucket): string {
+  if (b === 'root') return 'Unclassified'
+  return b.charAt(0).toUpperCase() + b.slice(1)
 }
 
 export interface SessionStats {

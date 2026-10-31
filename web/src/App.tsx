@@ -5,12 +5,15 @@ import {
   chooseConfigFolder,
   fetchConfig,
   fetchExif,
+  fetchFavorites,
   fetchPhotos,
   fetchPreviewStatus,
   fetchSession,
   fetchStats,
   imageUrl,
+  revealPhoto,
   saveSession,
+  setPhotoStarred,
   startPreviewWarmup,
   undoLast,
   type Bucket,
@@ -92,6 +95,8 @@ export default function App() {
   const { fullscreen, escHolding, toggleFullscreen } = useFullscreen()
   const [showExif, setShowExif] = useState(false)
   const [exif, setExif] = useState<ExifMetadata | null>(null)
+  const [starred, setStarred] = useState<Set<string>>(() => new Set())
+  const [starBusy, setStarBusy] = useState(false)
   const [comparePhotos, setComparePhotos] = useState<Photo[]>([])
   const [compareBucket, setCompareBucket] = useState<Bucket>('liked')
   const [libBucket, setLibBucket] = useState<Bucket>('liked')
@@ -230,6 +235,9 @@ export default function App() {
         if (data.photos[idx]) void persistSession('cull', data.photos[idx].name, 'root')
       }
       await refreshSessionStats()
+      void fetchFavorites()
+        .then((fav) => setStarred(new Set(fav.names ?? [])))
+        .catch(() => {})
     } catch (e) {
       setCullWarmGate(false)
       setCullWarmScanning(false)
@@ -372,7 +380,7 @@ export default function App() {
           ? 'right'
           : action === 'disliked'
             ? 'left'
-            : action === 'shortlisted'
+            : action === 'shortlisted' || action === 'posting'
               ? 'up'
               : 'down'
       setAnim(direction)
@@ -403,6 +411,44 @@ export default function App() {
     },
     [topMode, showToast, refreshSessionStats],
   )
+
+  const toggleStar = useCallback(
+    async (name: string) => {
+      if (!name || starBusy) return
+      const next = !starred.has(name)
+      setStarBusy(true)
+      setStarred((prev) => {
+        const n = new Set(prev)
+        if (next) n.add(name)
+        else n.delete(name)
+        return n
+      })
+      try {
+        await setPhotoStarred(name, next)
+      } catch (e) {
+        setStarred((prev) => {
+          const n = new Set(prev)
+          if (next) n.delete(name)
+          else n.add(name)
+          return n
+        })
+        showToast(e instanceof Error ? e.message : 'Could not update favourite', 'error')
+      } finally {
+        setStarBusy(false)
+      }
+    },
+    [starred, starBusy, showToast],
+  )
+
+  const revealInFinder = useCallback(() => {
+    const photo = photosRef.current[indexRef.current]
+    if (!photo) return
+    void revealPhoto(photo.name, 'root')
+      .then(() => showToast('Shown in Finder', 'neutral'))
+      .catch((err: unknown) =>
+        showToast(err instanceof Error ? err.message : 'Could not show in Finder', 'error'),
+      )
+  }, [showToast])
 
   const runUndo = useCallback(async () => {
     if (busyRef.current) return
@@ -465,6 +511,19 @@ export default function App() {
         setShowExif((p) => !p)
         return
       }
+      if (e.key === 'o' || e.key === 'O') {
+        if (status !== 'ready') return
+        e.preventDefault()
+        revealInFinder()
+        return
+      }
+      if (e.key === '*') {
+        if (status !== 'ready') return
+        e.preventDefault()
+        const photo = photosRef.current[indexRef.current]
+        if (photo) void toggleStar(photo.name)
+        return
+      }
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault()
         toggleFullscreen()
@@ -492,7 +551,10 @@ export default function App() {
       } else if (e.key === 't' || e.key === 'T') {
         e.preventDefault()
         void runAction('shortlisted')
-      } else if (e.key === 'd' || e.key === 'D' || e.key === 'x' || e.key === 'X') {
+      } else if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault()
+        void runAction('posting')
+      } else if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
         void runAction('disliked')
       } else if (e.key === 's' || e.key === 'S') {
@@ -500,7 +562,7 @@ export default function App() {
         void runAction('sharing')
       }
     },
-    [topMode, subMode, status, runAction, runUndo, toggleFullscreen, navigateCull],
+    [topMode, subMode, status, runAction, runUndo, toggleFullscreen, navigateCull, revealInFinder, toggleStar],
   )
 
   const processed = stats.total - stats.remaining
@@ -553,13 +615,13 @@ export default function App() {
         </nav>
         {topMode !== 'library' && (
           <div className="session-stats" title="Session statistics">
-            <span>S:{sessionStats.reviewed}</span>
-            <span>L:{sessionStats.liked}</span>
-            <span>T:{sessionStats.shortlisted}</span>
-            <span>D:{sessionStats.disliked}</span>
-            <span>Sh:{sessionStats.sharing}</span>
+            <span title="Reviewed this session">Rv:{sessionStats.reviewed}</span>
+            <span title="Liked">L:{sessionStats.liked}</span>
+            <span title="Shortlisted">Sl:{sessionStats.shortlisted}</span>
+            <span title="Disliked">D:{sessionStats.disliked}</span>
+            <span title="Sharing">Sh:{sessionStats.sharing}</span>
             {sessionStats.avg_decision_seconds > 0 && (
-              <span>~{sessionStats.avg_decision_seconds.toFixed(1)}s</span>
+              <span title="Average decision time">~{sessionStats.avg_decision_seconds.toFixed(1)}s</span>
             )}
           </div>
         )}
@@ -716,14 +778,11 @@ export default function App() {
                   >
                     ›
                   </button>
-                  <button
-                    type="button"
-                    className={`icon-btn exif-toggle${showExif ? ' icon-btn--active' : ''}`}
-                    onClick={() => setShowExif((p) => !p)}
-                    title="EXIF (I)"
-                  >
-                    EXIF
-                  </button>
+                  {starred.has(current.name) && (
+                    <span className="viewer-star-badge" title="Starred" aria-label="Starred">
+                      ★
+                    </span>
+                  )}
                   {showExif && (
                     <div className="exif-overlay">
                       {lines.length > 0 ? (
@@ -740,7 +799,7 @@ export default function App() {
                 </div>
                 <p className="filename">
                   Unclassified — {currentIndex + 1} / {photos.length} · {current.name}
-                  <span className="cull-nav-hint"> · ← → browse · L T D S decide</span>
+                  <span className="cull-nav-hint"> · ← → browse · D S L T P decide</span>
                 </p>
               </>
             )}
@@ -752,10 +811,13 @@ export default function App() {
                 {status === 'ready' && (
                   <div className="actions">
                     <button type="button" className="btn btn--dislike" disabled={busy} onClick={() => void runAction('disliked')}>
-                      Dislike <kbd>D</kbd>/<kbd>X</kbd>
+                      Disliked <kbd>D</kbd>
                     </button>
                     <button type="button" className="btn btn--sharing" disabled={busy} onClick={() => void runAction('sharing')}>
                       Sharing <kbd>S</kbd>
+                    </button>
+                    <button type="button" className="btn btn--like" disabled={busy} onClick={() => void runAction('liked')}>
+                      Liked <kbd>L</kbd>
                     </button>
                     <button
                       type="button"
@@ -763,13 +825,40 @@ export default function App() {
                       disabled={busy}
                       onClick={() => void runAction('shortlisted')}
                     >
-                      Shortlist <kbd>T</kbd>
+                      Shortlisted <kbd>T</kbd>
                     </button>
-                    <button type="button" className="btn btn--like" disabled={busy} onClick={() => void runAction('liked')}>
-                      Like <kbd>L</kbd>
+                    <button type="button" className="btn btn--posting" disabled={busy} onClick={() => void runAction('posting')}>
+                      Posting <kbd>P</kbd>
                     </button>
                     <button type="button" className="btn btn--neutral" disabled={busy} onClick={() => void runUndo()}>
                       Undo <kbd>⌫</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--neutral${current && starred.has(current.name) ? ' btn--star-on' : ''}`}
+                      disabled={starBusy || !current}
+                      onClick={() => current && void toggleStar(current.name)}
+                      title={current && starred.has(current.name) ? 'Unstar (*)' : 'Star (*)'}
+                    >
+                      {current && starred.has(current.name) ? '★ Starred' : '☆ Starred'} <kbd>*</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--neutral${showExif ? ' btn--exif-on' : ''}`}
+                      disabled={!current}
+                      onClick={() => setShowExif((p) => !p)}
+                      title="EXIF (I)"
+                    >
+                      EXIF <kbd>I</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--neutral"
+                      disabled={!current}
+                      onClick={revealInFinder}
+                      title="Show in Finder (O)"
+                    >
+                      Finder <kbd>O</kbd>
                     </button>
                   </div>
                 )}
@@ -786,7 +875,7 @@ export default function App() {
                   <span title="Posting">P:{stats.posting}</span>
                   <span title="Sharing">Sh:{stats.sharing}</span>
                   <span title="Disliked">D:{stats.disliked}</span>
-                  <span title="Unclassified">Left:{stats.remaining}</span>
+                  <span title="Unclassified">U:{stats.remaining}</span>
                 </div>
               </div>
             </footer>

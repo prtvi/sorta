@@ -450,7 +450,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !req.Action.Valid() {
-		writeError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be liked, shortlisted, disliked, or sharing")
+		writeError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be liked, shortlisted, posting, disliked, or sharing")
 		return
 	}
 

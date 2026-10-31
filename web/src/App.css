@@ -1413,7 +1413,7 @@ kbd {
 .viewer-star-badge {
   position: absolute;
   top: 0.65rem;
-  right: 0.65rem;
+  left: 0.65rem;
   z-index: 3;
   width: 2rem;
   height: 2rem;
@@ -1449,7 +1449,7 @@ kbd {
 }
 
 .library-viewer {
-  padding: 1rem;
+  padding: 0.5rem;
 }
 
 .library-viewer-inner,
@@ -1472,7 +1472,30 @@ kbd {
 .library-viewer-inner {
   max-width: min(1280px, 100%);
   width: min(1280px, 100%);
-  max-height: calc(100vh - 2rem);
+  height: calc(100vh - 1rem);
+  max-height: calc(100vh - 1rem);
+  padding: var(--space-3);
+  gap: var(--space-2);
+}
+
+.library-viewer-inner .actions {
+  gap: var(--space-1);
+}
+
+.library-viewer-inner .actions .btn {
+  min-width: auto;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.viewer-close-toggle {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 0.85rem;
+  line-height: 1;
 }
 
 .export-card {
@@ -1604,7 +1627,7 @@ kbd {
 .library-viewer-stage img,
 .library-viewer-stage .zoomable img {
   max-width: 100%;
-  max-height: min(76vh, calc(100vh - 11rem));
+  max-height: 100%;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -1613,7 +1636,8 @@ kbd {
 
 .library-viewer-stage .zoomable {
   width: 100%;
-  min-height: min(76vh, calc(100vh - 11rem));
+  height: 100%;
+  min-height: 0;
 }
 
 .zoomable {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   bucketAllowsMoves,
+  bucketLabel,
   burstKeep,
   detectBursts,
   exportBucket,
@@ -14,6 +15,7 @@ import {
   imageUrl,
   movePhoto,
   movePhotosBulk,
+  POSTED_READONLY_MSG,
   resetToUnclassified,
   revealPhoto,
   setPhotoStarred,
@@ -66,12 +68,6 @@ const EXPORT_MAX_BYTES = 15 * 1024 * 1024
 function canExportPhotos(b: Bucket): boolean {
   return EXPORTABLE_BUCKETS.includes(b)
 }
-
-function bucketLabel(b: Bucket) {
-  if (b === 'root') return 'Unclassified'
-  return b.charAt(0).toUpperCase() + b.slice(1)
-}
-
 
 function burstContaining(groups: BurstGroup[], name: string): BurstGroup | undefined {
   return groups.find((g) => g.photos.some((p) => p.name === name))
@@ -610,7 +606,7 @@ export default function LibraryView({
     async (names: string[], to: Bucket) => {
       if (names.length === 0 || to === bucket || busy) return
       if (!bucketAllowsMoves(bucket) || !bucketAllowsMoves(to)) {
-        onToast('Posted is Finder-managed — files cannot be moved in or out', 'neutral')
+        onToast(POSTED_READONLY_MSG, 'neutral')
         return
       }
       setBusy(true)
@@ -1130,7 +1126,7 @@ export default function LibraryView({
         } else if (e.key === 'p' || e.key === 'P') {
           e.preventDefault()
           requestMove('posting')
-        } else if (e.key === 'd' || e.key === 'D' || e.key === 'x' || e.key === 'X') {
+        } else if (e.key === 'd' || e.key === 'D') {
           e.preventDefault()
           requestMove('disliked')
         } else if (e.key === 's' || e.key === 'S') {
@@ -1192,9 +1188,6 @@ export default function LibraryView({
         e.preventDefault()
         requestMove('posting')
       } else if (e.key === 'd' || e.key === 'D') {
-        e.preventDefault()
-        requestMove('disliked')
-      } else if (e.key === 'x' || e.key === 'X') {
         e.preventDefault()
         requestMove('disliked')
       } else if (e.key === 's' || e.key === 'S') {
@@ -1397,6 +1390,15 @@ export default function LibraryView({
             <button
               type="button"
               className="btn btn--neutral btn--small"
+              disabled={busy || detecting}
+              onClick={() => void runUndo()}
+              title="Undo (⌫)"
+            >
+              Undo <kbd>⌫</kbd>
+            </button>
+            <button
+              type="button"
+              className="btn btn--neutral btn--small"
               disabled={visiblePhotos.length === 0 || detecting}
               onClick={() => setSelected(new Set(visiblePhotos.map((p) => p.name)))}
             >
@@ -1540,9 +1542,9 @@ export default function LibraryView({
             <span>{selected.size} selected</span>
             {bucketAllowsMoves(bucket) ? (
               <>
-                {bucket !== 'root' && (
-                  <button type="button" className="btn btn--neutral btn--small" disabled={busy} onClick={() => requestMove('root')}>
-                    Unclassified
+                {bucket !== 'disliked' && (
+                  <button type="button" className="btn btn--dislike btn--small" disabled={busy} onClick={() => requestMove('disliked')}>
+                    Disliked
                   </button>
                 )}
                 {bucket !== 'sharing' && (
@@ -1552,7 +1554,7 @@ export default function LibraryView({
                 )}
                 {bucket !== 'liked' && (
                   <button type="button" className="btn btn--like btn--small" disabled={busy} onClick={() => requestMove('liked')}>
-                    Like
+                    Liked
                   </button>
                 )}
                 {bucket !== 'shortlisted' && (
@@ -1562,7 +1564,7 @@ export default function LibraryView({
                     disabled={busy}
                     onClick={() => requestMove('shortlisted')}
                   >
-                    Shortlist
+                    Shortlisted
                   </button>
                 )}
                 {bucket !== 'posting' && (
@@ -1570,14 +1572,14 @@ export default function LibraryView({
                     Posting
                   </button>
                 )}
-                {bucket !== 'disliked' && (
-                  <button type="button" className="btn btn--dislike btn--small" disabled={busy} onClick={() => requestMove('disliked')}>
-                    Reject
+                {bucket !== 'root' && (
+                  <button type="button" className="btn btn--neutral btn--small" disabled={busy} onClick={() => requestMove('root')}>
+                    Unclassified
                   </button>
                 )}
               </>
             ) : (
-              <span className="muted">Add or remove files in Finder</span>
+              <span className="muted">{POSTED_READONLY_MSG}</span>
             )}
           </div>
         )}
@@ -1707,7 +1709,7 @@ export default function LibraryView({
                               </label>
                               <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
                               {starred.has(p.name) && (
-                                <span className="photo-star-badge" title="Favourited" aria-label="Favourited">
+                                <span className="photo-star-badge" title="Starred" aria-label="Starred">
                                   ★
                                 </span>
                               )}
@@ -1720,7 +1722,7 @@ export default function LibraryView({
                                     e.stopPropagation()
                                     void runBurstKeep(p.name)
                                   }}
-                                  title="Keep this, dislike rest of burst"
+                                  title="Keep this, move rest to Disliked"
                                 >
                                   Keep
                                 </button>
@@ -1778,7 +1780,7 @@ export default function LibraryView({
                                 onLoad={(e) => noteThumbAspect(p.name, e.currentTarget)}
                               />
                               {starred.has(p.name) && (
-                                <span className="photo-star-badge" title="Favourited" aria-label="Favourited">
+                                <span className="photo-star-badge" title="Starred" aria-label="Starred">
                                   ★
                                 </span>
                               )}
@@ -1845,36 +1847,50 @@ export default function LibraryView({
                 >
                   ›
                 </button>
+                <button
+                  type="button"
+                  className="icon-btn viewer-close-toggle"
+                  onClick={() => setViewer(null)}
+                  title="Close (Esc)"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
                 {starred.has(viewer.name) && (
-                  <span className="viewer-star-badge" title="Favourited" aria-label="Favourited">
+                  <span className="viewer-star-badge" title="Starred" aria-label="Starred">
                     ★
                   </span>
                 )}
+                {showExif && (
+                  <div className="exif-overlay">
+                    {exifLines(exif).length > 0 ? (
+                      <ul>
+                        {exifLines(exif).map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="exif-empty">No EXIF metadata</p>
+                    )}
+                  </div>
+                )}
               </div>
-              {showExif && (
-                <div className="library-exif">
-                  {exifLines(exif).length > 0 ? (
-                    <ul>
-                      {exifLines(exif).map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="exif-empty">No EXIF metadata</p>
-                  )}
-                </div>
-              )}
               <p className="filename">
                 {viewerBurst && viewerBurstIndex >= 0
                   ? `${bucketLabel(bucket)} — burst ${viewerBurstIndex + 1} / ${viewerBurst.photos.length} · ${viewer.name}`
                   : `${bucketLabel(bucket)} — ${focused + 1} / ${visiblePhotos.length} · ${viewer.name}`}
+                <span className="cull-nav-hint">
+                  {bucketAllowsMoves(bucket)
+                    ? ` · ← → browse · D S L T P${bucket !== 'root' ? ' U' : ''} decide`
+                    : ' · ← → browse'}
+                </span>
               </p>
               <div className="actions">
                 {bucketAllowsMoves(bucket) && (
                   <>
                     {bucket !== 'disliked' && (
                       <button type="button" className="btn btn--dislike" onClick={() => requestMove('disliked')}>
-                        Reject <kbd>X</kbd>
+                        Disliked <kbd>D</kbd>
                       </button>
                     )}
                     {bucket !== 'sharing' && (
@@ -1884,12 +1900,12 @@ export default function LibraryView({
                     )}
                     {bucket !== 'liked' && (
                       <button type="button" className="btn btn--like" onClick={() => requestMove('liked')}>
-                        Like <kbd>L</kbd>
+                        Liked <kbd>L</kbd>
                       </button>
                     )}
                     {bucket !== 'shortlisted' && (
                       <button type="button" className="btn btn--shortlisted" onClick={() => requestMove('shortlisted')}>
-                        Shortlist <kbd>T</kbd>
+                        Shortlisted <kbd>T</kbd>
                       </button>
                     )}
                     {bucket !== 'posting' && (
@@ -1906,12 +1922,21 @@ export default function LibraryView({
                 )}
                 <button
                   type="button"
+                  className="btn btn--neutral"
+                  disabled={busy}
+                  onClick={() => void runUndo()}
+                  title="Undo (⌫)"
+                >
+                  Undo <kbd>⌫</kbd>
+                </button>
+                <button
+                  type="button"
                   className={`btn btn--neutral${starred.has(viewer.name) ? ' btn--star-on' : ''}`}
                   disabled={starBusy}
                   onClick={() => void toggleStar(viewer.name)}
-                  title={starred.has(viewer.name) ? 'Unfavourite (*)' : 'Favourite (*)'}
+                  title={starred.has(viewer.name) ? 'Unstar (*)' : 'Star (*)'}
                 >
-                  {starred.has(viewer.name) ? '★ Starred' : '☆ Star'} <kbd>*</kbd>
+                  {starred.has(viewer.name) ? '★ Starred' : '☆ Starred'} <kbd>*</kbd>
                 </button>
                 <button
                   type="button"
@@ -1928,9 +1953,6 @@ export default function LibraryView({
                   title="Show in Finder (O)"
                 >
                   Finder <kbd>O</kbd>
-                </button>
-                <button type="button" className="btn btn--neutral" onClick={() => setViewer(null)}>
-                  Close
                 </button>
               </div>
             </div>

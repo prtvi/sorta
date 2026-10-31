@@ -51,6 +51,7 @@ type PhotoAction string
 const (
 	ActionLiked       PhotoAction = "liked"
 	ActionShortlisted PhotoAction = "shortlisted"
+	ActionPosting     PhotoAction = "posting"
 	ActionDisliked    PhotoAction = "disliked"
 	ActionSharing     PhotoAction = "sharing"
 )
@@ -58,7 +59,7 @@ const (
 // Valid reports whether a is a known action.
 func (a PhotoAction) Valid() bool {
 	switch a {
-	case ActionLiked, ActionShortlisted, ActionDisliked, ActionSharing:
+	case ActionLiked, ActionShortlisted, ActionPosting, ActionDisliked, ActionSharing:
 		return true
 	default:
 		return false
