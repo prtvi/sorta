@@ -314,6 +314,27 @@ func companionDestination(destDir, photoDest, companionSrc string) (string, erro
 	return uniqueDestination(dest)
 }
 
+// ListBucketImagePaths returns absolute paths of supported images in a bucket.
+// Skips EXIF reads — used for preview cache warmup.
+func (s *Store) ListBucketImagePaths(bucket models.Bucket) ([]string, error) {
+	if !bucket.LibraryBucket() {
+		return nil, fmt.Errorf("invalid library bucket")
+	}
+	dir, err := s.BucketDir(bucket)
+	if err != nil {
+		return nil, err
+	}
+	names, err := scanner.ListImageNames(dir)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	return paths, nil
+}
+
 // ListLibraryBucket returns photos in a bucket (root|liked|shortlisted|posting|sharing|disliked|posted).
 func (s *Store) ListLibraryBucket(bucket models.Bucket) ([]models.Photo, error) {
 	if !bucket.LibraryBucket() {

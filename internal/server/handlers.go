@@ -160,30 +160,49 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_BUCKET", "Invalid library bucket")
 		return
 	}
-	photos, err := s.Store.ListLibraryBucket(bucket)
+
+	// Cheap name-list fingerprint first — avoid EXIF rescan when cache is warm.
+	names, err := s.listBucketImageNames(bucket)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "SCAN_FAILED", "Could not scan library bucket")
 		return
 	}
-	fp := libraryFingerprint(photos)
+	fp := bucketImageFingerprint(names)
 
+	var photos []models.Photo
 	bursts := []models.BurstGroup{}
-	singles := photos
+	singles := []models.Photo{}
 
 	s.libMu.Lock()
 	cached, hit := s.libCache[bucket]
 	s.libMu.Unlock()
-	if hit && cached.fp == fp && cached.annotated {
+	if hit && cached.fp == fp {
 		photos = cached.photos
-		bursts = cached.bursts
-		singles = cached.singles
+		if cached.annotated {
+			bursts = cached.bursts
+			singles = cached.singles
+		} else {
+			singles = cached.singles
+			if singles == nil {
+				singles = cached.photos
+			}
+		}
 		if bursts == nil {
 			bursts = []models.BurstGroup{}
 		}
 		if singles == nil {
 			singles = []models.Photo{}
 		}
-	} else if !(hit && cached.fp == fp) {
+		if photos == nil {
+			photos = []models.Photo{}
+		}
+	} else {
+		photos, err = s.Store.ListLibraryBucket(bucket)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "SCAN_FAILED", "Could not scan library bucket")
+			return
+		}
+		singles = photos
 		s.libMu.Lock()
 		s.libCache[bucket] = libCacheEntry{fp: fp, photos: photos, bursts: nil, singles: photos, annotated: false}
 		s.libMu.Unlock()

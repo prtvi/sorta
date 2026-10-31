@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/prtvi/sorta/internal/filesystem"
 	"github.com/prtvi/sorta/internal/models"
@@ -141,6 +142,64 @@ func TestServePhotoThumb(t *testing.T) {
 	}
 	if ct := rr.Header().Get("Content-Type"); ct != "image/jpeg" {
 		t.Fatalf("content-type %q", ct)
+	}
+}
+
+func TestPreviewWarmup(t *testing.T) {
+	srv, _ := setup(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/preview/status?bucket=root", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+	var before models.PreviewWarmupStatus
+	if err := json.NewDecoder(rr.Body).Decode(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before.Total != 3 || before.Pending != 3 {
+		t.Fatalf("before warmup: %+v", before)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/preview/warmup?bucket=root", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("warmup status %d %s", rr.Code, rr.Body.String())
+	}
+
+	deadline := time.Now().Add(15 * time.Second)
+	var last models.PreviewWarmupStatus
+	for time.Now().Before(deadline) {
+		req = httptest.NewRequest(http.MethodGet, "/api/preview/status?bucket=root", nil)
+		rr = httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("poll status %d", rr.Code)
+		}
+		last = models.PreviewWarmupStatus{}
+		if err := json.NewDecoder(rr.Body).Decode(&last); err != nil {
+			t.Fatal(err)
+		}
+		if !last.Running && last.Pending == 0 && last.Ready+last.Failed >= last.Total {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if last.Pending != 0 || last.Ready < 1 {
+		t.Fatalf("warmup did not finish: %+v", last)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/preview/warmup?bucket=root", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	var again models.PreviewWarmupStatus
+	if err := json.NewDecoder(rr.Body).Decode(&again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Running || again.Pending != 0 {
+		t.Fatalf("second warmup should be a no-op: %+v", again)
 	}
 }
 

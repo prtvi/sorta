@@ -89,6 +89,8 @@ export default function App() {
   const [compareBucket, setCompareBucket] = useState<Bucket>('liked')
   const [libBucket, setLibBucket] = useState<Bucket>('liked')
   const [libPhoto, setLibPhoto] = useState<string | undefined>()
+  const [libraryMounted, setLibraryMounted] = useState(false)
+  const [libraryEpoch, setLibraryEpoch] = useState(0)
   const [needsPath, setNeedsPath] = useState(false)
   const [pathInput, setPathInput] = useState('')
   const [pathBusy, setPathBusy] = useState(false)
@@ -185,6 +187,7 @@ export default function App() {
     setTopMode(resumeMode)
     setLibBucket(resumeMode === 'library' ? resumeBucket : 'root')
     setLibPhoto(resumePhoto)
+    if (resumeMode === 'library') setLibraryMounted(true)
     if (resumeMode === 'cull') await loadCull(resumePhoto)
     else setStatus('ready')
   }, [loadCull])
@@ -298,6 +301,7 @@ export default function App() {
         await new Promise((r) => setTimeout(r, 220))
         setAnim(null)
         setStats(res.stats)
+        setLibraryEpoch((n) => n + 1)
         setPhotos((prev) => {
           const next = prev.filter((p) => p.name !== photo.name)
           setCurrentIndex(clampIndex(idx, next.length))
@@ -330,6 +334,7 @@ export default function App() {
       }
 
       if (res.stats) setStats(res.stats)
+      setLibraryEpoch((n) => n + 1)
 
       if (topMode === 'cull') {
         // Restore into the queue immediately — avoid full rescan/EXIF (slow).
@@ -430,6 +435,7 @@ export default function App() {
       setLibBucket(bucket)
       setLibPhoto('')
     }
+    setLibraryMounted(true)
     setTopMode('library')
     setSubMode('browse')
     setStatus('ready')
@@ -497,9 +503,15 @@ export default function App() {
         </div>
       )}
 
-      {topMode === 'library' && subMode === 'browse' && (
-        <div className="view-pane" key="library-browse">
+      {libraryMounted && (
+        <div
+          className="view-pane"
+          key="library-browse"
+          hidden={!(topMode === 'library' && subMode === 'browse')}
+        >
           <LibraryView
+            active={topMode === 'library' && subMode === 'browse'}
+            libraryEpoch={libraryEpoch}
             initialBucket={libBucket}
             initialPhoto={libPhoto}
             fullscreen={fullscreen}

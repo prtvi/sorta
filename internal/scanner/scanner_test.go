@@ -171,3 +171,22 @@ func TestIsSupportedImage(t *testing.T) {
 		}
 	}
 }
+
+func TestListImageNames(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.jpg", "b.PNG", "notes.txt", "skip.heic"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "liked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names, err := scanner.ListImageNames(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 3 {
+		t.Fatalf("got %v", names)
+	}
+}

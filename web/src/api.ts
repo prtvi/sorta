@@ -354,3 +354,25 @@ export async function setPhotoStarred(filename: string, starred: boolean): Promi
   })
   return parseJSON<StarResponse>(res)
 }
+
+export interface PreviewWarmupStatus {
+  bucket: Bucket
+  total: number
+  ready: number
+  pending: number
+  failed: number
+  running: boolean
+}
+
+export async function fetchPreviewStatus(bucket?: Bucket): Promise<PreviewWarmupStatus> {
+  const q = bucket ? `?bucket=${encodeURIComponent(bucket)}` : ''
+  const res = await fetch(`/api/preview/status${q}`)
+  return parseJSON<PreviewWarmupStatus>(res)
+}
+
+export async function startPreviewWarmup(bucket: Bucket): Promise<PreviewWarmupStatus> {
+  const res = await fetch(`/api/preview/warmup?bucket=${encodeURIComponent(bucket)}`, {
+    method: 'POST',
+  })
+  return parseJSON<PreviewWarmupStatus>(res)
+}

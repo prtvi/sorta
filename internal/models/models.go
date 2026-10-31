@@ -332,3 +332,13 @@ type StarResponse struct {
 	Filename string `json:"filename"`
 	Starred  bool   `json:"starred"`
 }
+
+// PreviewWarmupStatus is GET /api/preview/status (and POST /api/preview/warmup).
+type PreviewWarmupStatus struct {
+	Bucket  Bucket `json:"bucket"`
+	Total   int    `json:"total"`
+	Ready   int    `json:"ready"`
+	Pending int    `json:"pending"`
+	Failed  int    `json:"failed"`
+	Running bool   `json:"running"`
+}

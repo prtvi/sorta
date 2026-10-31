@@ -28,6 +28,10 @@ type Server struct {
 
 	libMu    sync.Mutex
 	libCache map[models.Bucket]libCacheEntry
+
+	warmMu   sync.Mutex
+	warm     thumbWarmState
+	warmDone map[models.Bucket]warmDoneEntry
 }
 
 type libCacheEntry struct {
@@ -43,6 +47,7 @@ func New(store *filesystem.Store) *Server {
 	return &Server{
 		Store:    store,
 		libCache: make(map[models.Bucket]libCacheEntry),
+		warmDone: make(map[models.Bucket]warmDoneEntry),
 	}
 }
 
@@ -59,6 +64,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/photos/{filename}/star", s.handlePutStar)
 	mux.HandleFunc("GET /api/library/{bucket}", s.handleLibrary)
 	mux.HandleFunc("POST /api/library/{bucket}/detect-bursts", s.handleDetectBursts)
+	mux.HandleFunc("GET /api/preview/status", s.handlePreviewStatus)
+	mux.HandleFunc("POST /api/preview/warmup", s.handlePreviewWarmup)
 	mux.HandleFunc("GET /api/photos/{filename}/exif", s.handleExif)
 	mux.HandleFunc("POST /api/photos/{filename}/reveal", s.handleReveal)
 	mux.HandleFunc("POST /api/photos/{filename}/action", s.handleAction)
@@ -166,6 +173,7 @@ func (s *Server) invalidateLibraryCache() {
 	s.libMu.Lock()
 	s.libCache = make(map[models.Bucket]libCacheEntry)
 	s.libMu.Unlock()
+	s.invalidateWarmDone()
 }
 
 func libraryFingerprint(photos []models.Photo) string {

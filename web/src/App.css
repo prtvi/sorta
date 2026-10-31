@@ -597,6 +597,11 @@ kbd {
   animation: view-enter 220ms ease both;
 }
 
+.view-pane[hidden] {
+  display: none !important;
+  animation: none;
+}
+
 @keyframes view-enter {
   from {
     opacity: 0;
@@ -745,6 +750,7 @@ kbd {
 }
 
 .library-main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1748,5 +1754,287 @@ body.sorta-css-fullscreen .app {
   opacity: 1;
   color: var(--text);
   border-color: #6a6a72;
+}
+
+/* Thumbnail warmup / first-load darkroom screen */
+.thumb-warmup {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 35%, rgba(42, 48, 58, 0.55), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 80% 80%, rgba(90, 70, 50, 0.12), transparent 55%),
+    var(--bg);
+}
+
+.thumb-warmup-glow {
+  position: absolute;
+  width: 28rem;
+  height: 28rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 214, 160, 0.07), transparent 65%);
+  filter: blur(8px);
+  animation: thumb-warmup-breathe 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.thumb-warmup-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  width: min(28rem, 92vw);
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+
+.thumb-warmup-film {
+  width: 100%;
+  max-width: 22rem;
+  height: 4.6rem;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  margin-bottom: 0.35rem;
+}
+
+.thumb-warmup-film-track {
+  display: flex;
+  gap: 0.35rem;
+  width: max-content;
+  animation: thumb-warmup-scroll 14s linear infinite;
+}
+
+.thumb-warmup-frame {
+  position: relative;
+  width: 5.2rem;
+  height: 4.4rem;
+  flex-shrink: 0;
+  border: 1px solid #3a3a40;
+  background: #121214;
+  border-radius: 0.15rem;
+}
+
+.thumb-warmup-sprocket {
+  position: absolute;
+  top: 0.35rem;
+  bottom: 0.35rem;
+  left: 0.2rem;
+  width: 0.28rem;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      #2a2a2e 0 0.22rem,
+      transparent 0.22rem 0.42rem
+    );
+}
+
+.thumb-warmup-sprocket--right {
+  left: auto;
+  right: 0.2rem;
+}
+
+.thumb-warmup-neg {
+  position: absolute;
+  inset: 0.45rem 0.7rem;
+  border-radius: 0.1rem;
+  opacity: 0.85;
+  animation: thumb-warmup-develop 2.8s ease-in-out infinite;
+}
+
+.thumb-warmup-neg--1 {
+  background: linear-gradient(145deg, #5a6a78, #2a3038 55%, #8a9aa8);
+  animation-delay: 0s;
+}
+.thumb-warmup-neg--2 {
+  background: linear-gradient(160deg, #6a5a48, #2e2820 50%, #a89070);
+  animation-delay: 0.35s;
+}
+.thumb-warmup-neg--3 {
+  background: linear-gradient(135deg, #4a5a52, #222826 60%, #7a9a88);
+  animation-delay: 0.7s;
+}
+.thumb-warmup-neg--4 {
+  background: linear-gradient(150deg, #5a4a58, #282028 55%, #9a7a90);
+  animation-delay: 1.05s;
+}
+
+.thumb-warmup-iris {
+  position: relative;
+  width: 3.4rem;
+  height: 3.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.thumb-warmup-iris-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid #4a4a52;
+  background:
+    conic-gradient(
+      from 0deg,
+      #1a1a1e 0 40deg,
+      #2e2e34 40deg 80deg,
+      #1a1a1e 80deg 120deg,
+      #2e2e34 120deg 160deg,
+      #1a1a1e 160deg 200deg,
+      #2e2e34 200deg 240deg,
+      #1a1a1e 240deg 280deg,
+      #2e2e34 280deg 320deg,
+      #1a1a1e 320deg 360deg
+    );
+  animation: thumb-warmup-spin 6s linear infinite;
+  box-shadow: inset 0 0 0 0.55rem var(--bg);
+}
+
+.thumb-warmup-iris-core {
+  position: absolute;
+  inset: 28%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #c8b090, #3a342c 70%);
+  box-shadow: 0 0 18px rgba(200, 176, 144, 0.25);
+  animation: thumb-warmup-pulse 2.2s ease-in-out infinite;
+}
+
+.thumb-warmup-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.thumb-warmup-quip {
+  margin: 0;
+  min-height: 1.4em;
+  color: var(--muted);
+  font-size: 0.95rem;
+  animation: thumb-warmup-fade 0.45s ease both;
+}
+
+.thumb-warmup-meter {
+  width: 100%;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: #1e1e22;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin-top: 0.35rem;
+}
+
+.thumb-warmup-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6a8a78, #c4a882 55%, #d8c4a0);
+  transition: width 0.35s ease;
+}
+
+.thumb-warmup-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.thumb-warmup-pct {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.thumb-warmup-sep {
+  opacity: 0.45;
+}
+
+.thumb-warmup-skip {
+  margin-top: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  opacity: 0.75;
+}
+
+.thumb-warmup-skip:hover {
+  color: var(--text);
+  opacity: 1;
+}
+
+.library-main--warming .library-scroll,
+.library-main--warming .library-toolbar-actions,
+.library-main--warming .selection-bar {
+  visibility: hidden;
+}
+
+@keyframes thumb-warmup-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes thumb-warmup-develop {
+  0%,
+  100% {
+    opacity: 0.35;
+    filter: contrast(0.85) brightness(0.9);
+  }
+  50% {
+    opacity: 0.95;
+    filter: contrast(1.05) brightness(1.05);
+  }
+}
+
+@keyframes thumb-warmup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes thumb-warmup-pulse {
+  0%,
+  100% {
+    transform: scale(0.88);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes thumb-warmup-breathe {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes thumb-warmup-fade {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 

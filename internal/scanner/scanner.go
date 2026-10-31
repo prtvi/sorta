@@ -146,6 +146,29 @@ func scanDir(dir, urlPrefix string) ([]models.Photo, error) {
 	return photos, nil
 }
 
+// ListImageNames lists supported image basenames in dir (non-recursive), no EXIF.
+// Faster than ScanRoot/ScanBucketDir when only paths are needed (e.g. preview warmup).
+func ListImageNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if IsSupportedImage(name) {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
 // CountInDir counts supported images directly inside dir (non-recursive).
 func CountInDir(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)

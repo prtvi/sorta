@@ -43,29 +43,56 @@ func JPEGFor(root, srcPath string) (string, error) {
 	return DisplayJPEG(root, srcPath, SizeView)
 }
 
-// DisplayJPEG returns a cached resized JPEG for UI display. Originals are never modified.
-func DisplayJPEG(root, srcPath string, size Size) (string, error) {
-	edge, suffix := sizeParams(size)
+// cacheDest returns the on-disk path for a resized preview of srcPath.
+func cacheDest(root, srcPath string, size Size) (dest, key string, err error) {
+	_, suffix := sizeParams(size)
 	cacheDir := filepath.Join(root, ".sorta", "cache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return "", fmt.Errorf("create cache: %w", err)
+		return "", "", fmt.Errorf("create cache: %w", err)
 	}
+	key, err = cacheKey(srcPath, suffix)
+	if err != nil {
+		return "", "", err
+	}
+	return filepath.Join(cacheDir, key+".jpg"), key, nil
+}
 
-	key, err := cacheKey(srcPath, suffix)
+// freshCache reports whether dest is a non-empty cached preview not older than src.
+func freshCache(srcPath, dest string) bool {
+	info, err := os.Stat(dest)
+	if err != nil || info.Size() == 0 {
+		return false
+	}
+	srcInfo, err := os.Stat(srcPath)
+	if err != nil {
+		return false
+	}
+	return !srcInfo.ModTime().After(info.ModTime())
+}
+
+// HasCachedJPEG reports whether a valid resized JPEG already exists for srcPath.
+func HasCachedJPEG(root, srcPath string, size Size) bool {
+	dest, _, err := cacheDest(root, srcPath, size)
+	if err != nil {
+		return false
+	}
+	return freshCache(srcPath, dest)
+}
+
+// DisplayJPEG returns a cached resized JPEG for UI display. Originals are never modified.
+func DisplayJPEG(root, srcPath string, size Size) (string, error) {
+	edge, _ := sizeParams(size)
+	dest, key, err := cacheDest(root, srcPath, size)
 	if err != nil {
 		return "", err
 	}
-	dest := filepath.Join(cacheDir, key+".jpg")
 
 	lock := lockFor(key)
 	lock.Lock()
 	defer lock.Unlock()
 
-	if info, err := os.Stat(dest); err == nil && info.Size() > 0 {
-		srcInfo, err := os.Stat(srcPath)
-		if err == nil && !srcInfo.ModTime().After(info.ModTime()) {
-			return dest, nil
-		}
+	if freshCache(srcPath, dest) {
+		return dest, nil
 	}
 
 	if err := convertResizedJPEG(srcPath, dest, edge); err != nil {
