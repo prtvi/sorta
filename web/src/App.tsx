@@ -563,21 +563,23 @@ export default function App() {
             )}
           </div>
         )}
-        {topMode === 'cull' && (status === 'ready' || status === 'done') && (
-          <div className="progress" title="Unclassified (root) folder size · progress">
-            {formatDirSize(stats.root_dir_size_bytes ?? 0)}
-            <span className="progress-sep">·</span>
-            {processed} / {stats.total}
-          </div>
-        )}
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={toggleFullscreen}
-          title={fullscreen ? 'Hold Esc to exit fullscreen' : 'Fullscreen (F)'}
-        >
-          {fullscreen ? '⤢' : '⛶'}
-        </button>
+        <div className="header-right">
+          {topMode === 'cull' && (status === 'ready' || status === 'done') && (
+            <div className="progress" title="Unclassified (root) folder size · progress">
+              {formatDirSize(stats.root_dir_size_bytes ?? 0)}
+              <span className="progress-sep">·</span>
+              {processed} / {stats.total}
+            </div>
+          )}
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={toggleFullscreen}
+            title={fullscreen ? 'Hold Esc to exit fullscreen' : 'Fullscreen (F)'}
+          >
+            {fullscreen ? '⤢' : '⛶'}
+          </button>
+        </div>
       </header>
       {fullscreen && (
         <div className={`fs-esc-hint${escHolding ? ' fs-esc-hint--holding' : ''}`} aria-live="polite">

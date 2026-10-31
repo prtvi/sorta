@@ -75,8 +75,14 @@ kbd {
   letter-spacing: 0.02em;
 }
 
-.progress {
+.header-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.progress {
   font-family: var(--mono);
   font-size: 0.95rem;
   color: var(--muted);
@@ -138,7 +144,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #050505;
+  background: var(--bg);
   border-radius: 0.35rem;
   overflow: hidden;
   transition: transform 220ms ease, opacity 220ms ease;
@@ -959,7 +965,7 @@ kbd {
 
 .library-search-hit-media {
   aspect-ratio: 1;
-  background: #050505;
+  background: var(--bg);
   border-radius: 0.3rem;
   overflow: hidden;
 }
@@ -1117,7 +1123,7 @@ kbd {
   gap: var(--justified-gap, 0.5px);
   width: 100%;
   min-width: 0;
-  background: #000;
+  background: var(--bg);
 }
 
 .photo-justified-row {
@@ -1133,7 +1139,7 @@ kbd {
 .photo-tile--justified {
   flex: 0 0 auto;
   border-radius: 0;
-  background: #050505;
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -1318,7 +1324,7 @@ kbd {
 .photo-tile-media {
   position: relative;
   aspect-ratio: 1;
-  background: #050505;
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -1562,7 +1568,7 @@ kbd {
   max-width: 100%;
   flex: 1;
   min-height: 0;
-  background: #050505;
+  background: var(--bg);
   border-radius: 0.35rem;
   overflow: hidden;
   width: 100%;
@@ -1697,7 +1703,7 @@ kbd {
 }
 
 .compare-pane {
-  background: #050505;
+  background: var(--bg);
   border: 2px solid var(--border);
   border-radius: 0.35rem;
   padding: var(--space-2);

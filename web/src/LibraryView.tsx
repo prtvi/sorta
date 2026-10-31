@@ -1025,6 +1025,32 @@ export default function LibraryView({
       )
   }, [viewer, bucket, onToast])
 
+  const navigateViewer = useCallback(
+    (delta: -1 | 1) => {
+      if (!viewer) return
+      const burst = burstContaining(visibleBursts, viewer.name)
+      if (burst) {
+        const bi = burst.photos.findIndex((p) => p.name === viewer.name)
+        const nextBi = bi + delta
+        if (nextBi < 0 || nextBi >= burst.photos.length) return
+        const nextPhoto = burst.photos[nextBi]
+        const gi = visiblePhotos.findIndex((p) => p.name === nextPhoto.name)
+        if (gi < 0) return
+        setFocused(gi)
+        setViewer(visiblePhotos[gi])
+        shownAt.current = Date.now()
+        return
+      }
+      const next = focused + delta
+      if (next >= 0 && next < visiblePhotos.length) {
+        setFocused(next)
+        setViewer(visiblePhotos[next])
+        shownAt.current = Date.now()
+      }
+    },
+    [viewer, visibleBursts, visiblePhotos, focused],
+  )
+
   useKeyboard(
     (e) => {
       if (!activeRef.current) return
@@ -1092,26 +1118,7 @@ export default function LibraryView({
         }
         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
           e.preventDefault()
-          const delta = e.key === 'ArrowRight' ? 1 : -1
-          const burst = burstContaining(visibleBursts, viewer.name)
-          if (burst) {
-            const bi = burst.photos.findIndex((p) => p.name === viewer.name)
-            const nextBi = bi + delta
-            if (nextBi < 0 || nextBi >= burst.photos.length) return
-            const nextPhoto = burst.photos[nextBi]
-            const gi = visiblePhotos.findIndex((p) => p.name === nextPhoto.name)
-            if (gi < 0) return
-            setFocused(gi)
-            setViewer(visiblePhotos[gi])
-            shownAt.current = Date.now()
-            return
-          }
-          const next = focused + delta
-          if (next >= 0 && next < visiblePhotos.length) {
-            setFocused(next)
-            setViewer(visiblePhotos[next])
-            shownAt.current = Date.now()
-          }
+          navigateViewer(e.key === 'ArrowRight' ? 1 : -1)
           return
         }
         if (e.key === 'l' || e.key === 'L') {
@@ -1204,7 +1211,7 @@ export default function LibraryView({
         setSelected(new Set(visiblePhotos.map((p) => p.name)))
       }
     },
-    [visiblePhotos, visibleBursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, searchOpen, closeSearch, requestMove, runUndo, onToggleFullscreen, revealInFinder, toggleStar],
+    [visiblePhotos, visibleBursts, focused, viewer, confirm, toolsOpen, exportOpen, exporting, resetOpen, busy, detecting, bucket, searchOpen, closeSearch, requestMove, runUndo, onToggleFullscreen, revealInFinder, toggleStar, navigateViewer],
   )
 
   const onDragStart = (e: React.DragEvent, name: string) => {
@@ -1236,6 +1243,12 @@ export default function LibraryView({
   const viewerBurstIndex = viewerBurst
     ? viewerBurst.photos.findIndex((p) => p.name === viewer!.name)
     : -1
+  const viewerCanPrev = viewerBurst
+    ? viewerBurstIndex > 0
+    : focused > 0
+  const viewerCanNext = viewerBurst
+    ? viewerBurstIndex >= 0 && viewerBurstIndex < viewerBurst.photos.length - 1
+    : focused < visiblePhotos.length - 1
   const showThumbWarmup = !thumbsReady && thumbGateVisible
 
   return (
@@ -1807,11 +1820,31 @@ export default function LibraryView({
           >
             <div className="library-viewer-inner" onClick={(e) => e.stopPropagation()}>
               <div className="library-viewer-stage">
+                <button
+                  type="button"
+                  className="cull-nav cull-nav--prev"
+                  disabled={!viewerCanPrev}
+                  onClick={() => navigateViewer(-1)}
+                  title="Previous (←)"
+                  aria-label="Previous photo"
+                >
+                  ‹
+                </button>
                 <ZoomableImage
                   src={imageUrl(viewer.url, 'view')}
                   alt={viewer.name}
                   resetKey={viewer.name}
                 />
+                <button
+                  type="button"
+                  className="cull-nav cull-nav--next"
+                  disabled={!viewerCanNext}
+                  onClick={() => navigateViewer(1)}
+                  title="Next (→)"
+                  aria-label="Next photo"
+                >
+                  ›
+                </button>
                 {starred.has(viewer.name) && (
                   <span className="viewer-star-badge" title="Favourited" aria-label="Favourited">
                     ★
