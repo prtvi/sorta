@@ -31,7 +31,7 @@ type Server struct {
 
 	warmMu   sync.Mutex
 	warm     thumbWarmState
-	warmDone map[models.Bucket]warmDoneEntry
+	warmDone map[string]warmDoneEntry
 }
 
 type libCacheEntry struct {
@@ -47,7 +47,7 @@ func New(store *filesystem.Store) *Server {
 	return &Server{
 		Store:    store,
 		libCache: make(map[models.Bucket]libCacheEntry),
-		warmDone: make(map[models.Bucket]warmDoneEntry),
+		warmDone: make(map[string]warmDoneEntry),
 	}
 }
 
@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config", s.handlePutConfig)
+	mux.HandleFunc("POST /api/config/choose", s.handleChooseConfig)
 	mux.HandleFunc("GET /api/photos", s.handleListPhotos)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/session", s.handleGetSession)

@@ -144,6 +144,7 @@ export interface SessionState {
 export interface ConfigResponse {
   configured: boolean
   root?: string
+  cancelled?: boolean
 }
 
 export interface ApiError {
@@ -176,6 +177,12 @@ export async function setConfigPath(path: string): Promise<ConfigResponse> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
   })
+  return parseJSON<ConfigResponse>(res)
+}
+
+/** Opens a native folder picker (Finder / Explorer) and configures Sorta with the selection. */
+export async function chooseConfigFolder(): Promise<ConfigResponse> {
+  const res = await fetch('/api/config/choose', { method: 'POST' })
   return parseJSON<ConfigResponse>(res)
 }
 
@@ -355,8 +362,11 @@ export async function setPhotoStarred(filename: string, starred: boolean): Promi
   return parseJSON<StarResponse>(res)
 }
 
+export type PreviewSize = ImageSize
+
 export interface PreviewWarmupStatus {
   bucket: Bucket
+  size: PreviewSize | string
   total: number
   ready: number
   pending: number
@@ -364,14 +374,27 @@ export interface PreviewWarmupStatus {
   running: boolean
 }
 
-export async function fetchPreviewStatus(bucket?: Bucket): Promise<PreviewWarmupStatus> {
-  const q = bucket ? `?bucket=${encodeURIComponent(bucket)}` : ''
-  const res = await fetch(`/api/preview/status${q}`)
+function previewQuery(bucket?: Bucket, size?: PreviewSize): string {
+  const params = new URLSearchParams()
+  if (bucket) params.set('bucket', bucket)
+  if (size) params.set('size', size)
+  const q = params.toString()
+  return q ? `?${q}` : ''
+}
+
+export async function fetchPreviewStatus(
+  bucket?: Bucket,
+  size: PreviewSize = 'thumb',
+): Promise<PreviewWarmupStatus> {
+  const res = await fetch(`/api/preview/status${previewQuery(bucket, size)}`)
   return parseJSON<PreviewWarmupStatus>(res)
 }
 
-export async function startPreviewWarmup(bucket: Bucket): Promise<PreviewWarmupStatus> {
-  const res = await fetch(`/api/preview/warmup?bucket=${encodeURIComponent(bucket)}`, {
+export async function startPreviewWarmup(
+  bucket: Bucket,
+  size: PreviewSize = 'thumb',
+): Promise<PreviewWarmupStatus> {
+  const res = await fetch(`/api/preview/warmup${previewQuery(bucket, size)}`, {
     method: 'POST',
   })
   return parseJSON<PreviewWarmupStatus>(res)

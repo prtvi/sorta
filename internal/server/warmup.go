@@ -16,6 +16,7 @@ import (
 type thumbWarmState struct {
 	gen     uint64
 	bucket  models.Bucket
+	size    preview.Size
 	total   int
 	ready   int
 	pending int
@@ -23,11 +24,22 @@ type thumbWarmState struct {
 	running bool
 }
 
-// warmDoneEntry remembers a finished warmup fingerprint per bucket so repeat
-// Library opens don't re-stat every cached JPEG.
+// warmDoneEntry remembers a finished warmup fingerprint per bucket+size so
+// repeat opens don't re-stat every cached JPEG.
 type warmDoneEntry struct {
 	fp    string
 	total int
+}
+
+func warmDoneKey(bucket models.Bucket, size preview.Size) string {
+	return string(bucket) + "|" + string(size)
+}
+
+func parseWarmupSize(v string) preview.Size {
+	if strings.EqualFold(v, string(preview.SizeView)) {
+		return preview.SizeView
+	}
+	return preview.SizeThumb
 }
 
 func (s *Server) previewStatusSnapshot() models.PreviewWarmupStatus {
@@ -35,6 +47,7 @@ func (s *Server) previewStatusSnapshot() models.PreviewWarmupStatus {
 	defer s.warmMu.Unlock()
 	return models.PreviewWarmupStatus{
 		Bucket:  s.warm.bucket,
+		Size:    string(s.warm.size),
 		Total:   s.warm.total,
 		Ready:   s.warm.ready,
 		Pending: s.warm.pending,
@@ -45,6 +58,7 @@ func (s *Server) previewStatusSnapshot() models.PreviewWarmupStatus {
 
 func (s *Server) handlePreviewStatus(w http.ResponseWriter, r *http.Request) {
 	bucket := models.Bucket(r.URL.Query().Get("bucket"))
+	size := parseWarmupSize(r.URL.Query().Get("size"))
 	if bucket == "" {
 		writeJSON(w, http.StatusOK, s.previewStatusSnapshot())
 		return
@@ -55,18 +69,17 @@ func (s *Server) handlePreviewStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cur := s.previewStatusSnapshot()
-	if cur.Running && cur.Bucket == bucket {
+	if cur.Running && cur.Bucket == bucket && cur.Size == string(size) {
 		writeJSON(w, http.StatusOK, cur)
 		return
 	}
 
-	// Live counters without a bucket filter, or idle — prefer done-cache / snapshot.
-	if status, ok := s.cachedWarmStatus(bucket); ok {
+	if status, ok := s.cachedWarmStatus(bucket, size); ok {
 		writeJSON(w, http.StatusOK, status)
 		return
 	}
 
-	status, err := s.inspectThumbWarmup(bucket)
+	status, err := s.inspectWarmup(bucket, size)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "SCAN_FAILED", "Could not scan photos for previews")
 		return
@@ -83,7 +96,8 @@ func (s *Server) handlePreviewWarmup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_BUCKET", "Invalid library bucket")
 		return
 	}
-	status, err := s.startThumbWarmup(bucket)
+	size := parseWarmupSize(r.URL.Query().Get("size"))
+	status, err := s.startWarmup(bucket, size)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "SCAN_FAILED", "Could not start preview warmup")
 		return
@@ -105,20 +119,22 @@ func (s *Server) listBucketImageNames(bucket models.Bucket) ([]string, error) {
 	return scanner.ListImageNames(dir)
 }
 
-func (s *Server) cachedWarmStatus(bucket models.Bucket) (models.PreviewWarmupStatus, bool) {
+func (s *Server) cachedWarmStatus(bucket models.Bucket, size preview.Size) (models.PreviewWarmupStatus, bool) {
 	names, err := s.listBucketImageNames(bucket)
 	if err != nil {
 		return models.PreviewWarmupStatus{}, false
 	}
 	fp := bucketImageFingerprint(names)
+	key := warmDoneKey(bucket, size)
 	s.warmMu.Lock()
 	defer s.warmMu.Unlock()
-	done, ok := s.warmDone[bucket]
+	done, ok := s.warmDone[key]
 	if !ok || done.fp != fp {
 		return models.PreviewWarmupStatus{}, false
 	}
 	return models.PreviewWarmupStatus{
 		Bucket:  bucket,
+		Size:    string(size),
 		Total:   done.total,
 		Ready:   done.total,
 		Pending: 0,
@@ -127,10 +143,10 @@ func (s *Server) cachedWarmStatus(bucket models.Bucket) (models.PreviewWarmupSta
 	}, true
 }
 
-func (s *Server) markWarmDone(bucket models.Bucket, names []string) {
+func (s *Server) markWarmDone(bucket models.Bucket, size preview.Size, names []string) {
 	fp := bucketImageFingerprint(names)
 	s.warmMu.Lock()
-	s.warmDone[bucket] = warmDoneEntry{fp: fp, total: len(names)}
+	s.warmDone[warmDoneKey(bucket, size)] = warmDoneEntry{fp: fp, total: len(names)}
 	s.warmMu.Unlock()
 }
 
@@ -138,28 +154,30 @@ func (s *Server) invalidateWarmDone(buckets ...models.Bucket) {
 	s.warmMu.Lock()
 	defer s.warmMu.Unlock()
 	if len(buckets) == 0 {
-		s.warmDone = make(map[models.Bucket]warmDoneEntry)
+		s.warmDone = make(map[string]warmDoneEntry)
 		return
 	}
 	for _, b := range buckets {
-		delete(s.warmDone, b)
+		delete(s.warmDone, warmDoneKey(b, preview.SizeThumb))
+		delete(s.warmDone, warmDoneKey(b, preview.SizeView))
 	}
 }
 
-func (s *Server) inspectThumbWarmup(bucket models.Bucket) (models.PreviewWarmupStatus, error) {
+func (s *Server) inspectWarmup(bucket models.Bucket, size preview.Size) (models.PreviewWarmupStatus, error) {
 	paths, err := s.Store.ListBucketImagePaths(bucket)
 	if err != nil {
 		return models.PreviewWarmupStatus{}, err
 	}
 	ready := 0
 	for _, p := range paths {
-		if preview.HasCachedJPEG(s.Store.Root, p, preview.SizeThumb) {
+		if preview.HasCachedJPEG(s.Store.Root, p, size) {
 			ready++
 		}
 	}
 	total := len(paths)
 	return models.PreviewWarmupStatus{
 		Bucket:  bucket,
+		Size:    string(size),
 		Total:   total,
 		Ready:   ready,
 		Pending: total - ready,
@@ -168,13 +186,13 @@ func (s *Server) inspectThumbWarmup(bucket models.Bucket) (models.PreviewWarmupS
 	}, nil
 }
 
-func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupStatus, error) {
-	// Fast path: names-only fingerprint — skip per-file cache stats when unchanged.
-	if status, ok := s.cachedWarmStatus(bucket); ok {
+func (s *Server) startWarmup(bucket models.Bucket, size preview.Size) (models.PreviewWarmupStatus, error) {
+	if status, ok := s.cachedWarmStatus(bucket, size); ok {
 		s.warmMu.Lock()
 		s.warm = thumbWarmState{
 			gen:     s.warm.gen + 1,
 			bucket:  bucket,
+			size:    size,
 			total:   status.Total,
 			ready:   status.Ready,
 			pending: 0,
@@ -186,10 +204,10 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 	}
 
 	s.warmMu.Lock()
-	// Same bucket already warming — return live counters.
-	if s.warm.running && s.warm.bucket == bucket {
+	if s.warm.running && s.warm.bucket == bucket && s.warm.size == size {
 		out := models.PreviewWarmupStatus{
 			Bucket:  s.warm.bucket,
+			Size:    string(s.warm.size),
 			Total:   s.warm.total,
 			Ready:   s.warm.ready,
 			Pending: s.warm.pending,
@@ -201,7 +219,7 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 	}
 	s.warmMu.Unlock()
 
-	status, err := s.inspectThumbWarmup(bucket)
+	status, err := s.inspectWarmup(bucket, size)
 	if err != nil {
 		return models.PreviewWarmupStatus{}, err
 	}
@@ -211,6 +229,7 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 		s.warm = thumbWarmState{
 			gen:     s.warm.gen + 1,
 			bucket:  bucket,
+			size:    size,
 			total:   status.Total,
 			ready:   status.Ready,
 			pending: 0,
@@ -219,9 +238,10 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 		}
 		s.warmMu.Unlock()
 		names, _ := s.listBucketImageNames(bucket)
-		s.markWarmDone(bucket, names)
+		s.markWarmDone(bucket, size, names)
 		return models.PreviewWarmupStatus{
 			Bucket:  bucket,
+			Size:    string(size),
 			Total:   status.Total,
 			Ready:   status.Ready,
 			Pending: 0,
@@ -230,10 +250,10 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 		}, nil
 	}
 
-	// Re-check running under lock after inspect (another request may have started).
-	if s.warm.running && s.warm.bucket == bucket {
+	if s.warm.running && s.warm.bucket == bucket && s.warm.size == size {
 		out := models.PreviewWarmupStatus{
 			Bucket:  s.warm.bucket,
+			Size:    string(s.warm.size),
 			Total:   s.warm.total,
 			Ready:   s.warm.ready,
 			Pending: s.warm.pending,
@@ -247,6 +267,7 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 	s.warm.gen++
 	gen := s.warm.gen
 	s.warm.bucket = bucket
+	s.warm.size = size
 	s.warm.total = status.Total
 	s.warm.ready = status.Ready
 	s.warm.pending = status.Pending
@@ -254,10 +275,11 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 	s.warm.running = true
 	s.warmMu.Unlock()
 
-	go s.runThumbWarmup(gen, bucket)
+	go s.runWarmup(gen, bucket, size)
 
 	return models.PreviewWarmupStatus{
 		Bucket:  bucket,
+		Size:    string(size),
 		Total:   status.Total,
 		Ready:   status.Ready,
 		Pending: status.Pending,
@@ -266,7 +288,7 @@ func (s *Server) startThumbWarmup(bucket models.Bucket) (models.PreviewWarmupSta
 	}, nil
 }
 
-func (s *Server) runThumbWarmup(gen uint64, bucket models.Bucket) {
+func (s *Server) runWarmup(gen uint64, bucket models.Bucket, size preview.Size) {
 	defer func() {
 		s.warmMu.Lock()
 		if s.warm.gen == gen {
@@ -286,7 +308,7 @@ func (s *Server) runThumbWarmup(gen uint64, bucket models.Bucket) {
 	pending := make([]string, 0, len(paths))
 	ready := 0
 	for _, p := range paths {
-		if preview.HasCachedJPEG(s.Store.Root, p, preview.SizeThumb) {
+		if preview.HasCachedJPEG(s.Store.Root, p, size) {
 			ready++
 			continue
 		}
@@ -309,7 +331,7 @@ func (s *Server) runThumbWarmup(gen uint64, bucket models.Bucket) {
 		for i, p := range paths {
 			names[i] = filepath.Base(p)
 		}
-		s.markWarmDone(bucket, names)
+		s.markWarmDone(bucket, size, names)
 		return
 	}
 
@@ -335,7 +357,7 @@ func (s *Server) runThumbWarmup(gen uint64, bucket models.Bucket) {
 				if !alive {
 					return
 				}
-				_, err := preview.DisplayJPEG(s.Store.Root, path, preview.SizeThumb)
+				_, err := preview.DisplayJPEG(s.Store.Root, path, size)
 				s.warmMu.Lock()
 				if s.warm.gen != gen {
 					s.warmMu.Unlock()
@@ -375,6 +397,6 @@ func (s *Server) runThumbWarmup(gen uint64, bucket models.Bucket) {
 		for i, p := range paths {
 			names[i] = filepath.Base(p)
 		}
-		s.markWarmDone(bucket, names)
+		s.markWarmDone(bucket, size, names)
 	}
 }

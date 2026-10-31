@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { PreviewWarmupStatus } from './api'
 
-const QUIPS = [
+const LIBRARY_QUIPS = [
   'Developing the contact sheet…',
   'Teaching thumbnails their stage marks…',
   'Negotiating with stubborn HEICs…',
@@ -14,27 +14,44 @@ const QUIPS = [
   'Asking each photo to smile for the library…',
 ]
 
+const CULL_QUIPS = [
+  'Lining up the keepers and the almosts…',
+  'Sharpening your yes/no reflexes…',
+  'Warming the enlarger for full-frame peeks…',
+  'Coaxing big previews out of shy HEICs…',
+  'Stacking the reject pile (metaphorically)…',
+  'Giving every frame a fair first look…',
+  'Loading the cull conveyor…',
+  'One more sip—wait, that’s still the image tool…',
+  'Teaching pixels to take rejection well…',
+  'Preparing the stage for decisive thumbs…',
+]
+
 type Props = {
   status: PreviewWarmupStatus | null
   scanning?: boolean
+  mode?: 'library' | 'cull'
   onSkip?: () => void
 }
 
-export default function ThumbWarmupScreen({ status, scanning, onSkip }: Props) {
+export default function ThumbWarmupScreen({ status, scanning, mode = 'library', onSkip }: Props) {
+  const quips = mode === 'cull' ? CULL_QUIPS : LIBRARY_QUIPS
   const [quipIndex, setQuipIndex] = useState(0)
 
   useEffect(() => {
+    setQuipIndex(0)
     const id = window.setInterval(() => {
-      setQuipIndex((i) => (i + 1) % QUIPS.length)
+      setQuipIndex((i) => (i + 1) % quips.length)
     }, 2800)
     return () => window.clearInterval(id)
-  }, [])
+  }, [quips.length, mode])
 
   const total = status?.total ?? 0
   const ready = status?.ready ?? 0
   const pending = status?.pending ?? 0
   const failed = status?.failed ?? 0
   const pct = total > 0 ? Math.min(100, Math.round((ready / total) * 100)) : scanning ? 0 : 100
+  const title = mode === 'cull' ? 'Brewing your cull deck' : 'Brewing your library'
 
   return (
     <div className="thumb-warmup" role="status" aria-live="polite" aria-busy="true">
@@ -57,9 +74,9 @@ export default function ThumbWarmupScreen({ status, scanning, onSkip }: Props) {
           <div className="thumb-warmup-iris-core" />
         </div>
 
-        <h2 className="thumb-warmup-title">Brewing your library</h2>
-        <p className="thumb-warmup-quip" key={quipIndex}>
-          {scanning && (!status || total === 0) ? 'Counting frames in the folder…' : QUIPS[quipIndex]}
+        <h2 className="thumb-warmup-title">{title}</h2>
+        <p className="thumb-warmup-quip" key={`${mode}-${quipIndex}`}>
+          {scanning && (!status || total === 0) ? 'Counting frames in the folder…' : quips[quipIndex]}
         </p>
 
         <div className="thumb-warmup-meter">

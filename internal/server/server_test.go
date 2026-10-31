@@ -161,6 +161,9 @@ func TestPreviewWarmup(t *testing.T) {
 	if before.Total != 3 || before.Pending != 3 {
 		t.Fatalf("before warmup: %+v", before)
 	}
+	if before.Size != "thumb" {
+		t.Fatalf("default size want thumb, got %q", before.Size)
+	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/preview/warmup?bucket=root", nil)
 	rr = httptest.NewRecorder()

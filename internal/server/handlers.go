@@ -44,7 +44,28 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid JSON body")
 		return
 	}
-	store, err := filesystem.NewStore(req.Path)
+	s.applyConfigPath(w, req.Path)
+}
+
+func (s *Server) handleChooseConfig(w http.ResponseWriter, r *http.Request) {
+	if s.Configured() {
+		writeError(w, http.StatusConflict, "ALREADY_CONFIGURED", "Photo directory is already set")
+		return
+	}
+	path, err := filesystem.ChooseDirectory("Choose a photo folder for Sorta")
+	if errors.Is(err, filesystem.ErrDirectoryCancelled) {
+		writeJSON(w, http.StatusOK, models.ConfigResponse{Configured: false, Cancelled: true})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "PICKER_FAILED", err.Error())
+		return
+	}
+	s.applyConfigPath(w, path)
+}
+
+func (s *Server) applyConfigPath(w http.ResponseWriter, path string) {
+	store, err := filesystem.NewStore(path)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_PATH", err.Error())
 		return

@@ -267,7 +267,7 @@ export default function LibraryView({
     setThumbGateVisible(false)
     setThumbStatus(null)
     try {
-      let status = await startPreviewWarmup(b)
+      let status = await startPreviewWarmup(b, 'thumb')
       if (gen !== thumbWarmGen.current) return
       setThumbStatus(status)
       setThumbScanning(false)
@@ -281,7 +281,7 @@ export default function LibraryView({
       setThumbGateVisible(true)
       while (gen === thumbWarmGen.current) {
         await new Promise((r) => window.setTimeout(r, 280))
-        status = await fetchPreviewStatus(b)
+        status = await fetchPreviewStatus(b, 'thumb')
         if (gen !== thumbWarmGen.current) return
         setThumbStatus(status)
         if (!status.running && status.pending <= 0) {
@@ -1243,6 +1243,7 @@ export default function LibraryView({
       <section className={`library-main${showThumbWarmup ? ' library-main--warming' : ''}`}>
         {showThumbWarmup && (
           <ThumbWarmupScreen
+            mode="library"
             status={thumbStatus}
             scanning={thumbScanning || !thumbStatus}
             onSkip={

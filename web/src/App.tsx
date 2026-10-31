@@ -2,19 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   classifyPhoto,
+  chooseConfigFolder,
   fetchConfig,
   fetchExif,
   fetchPhotos,
+  fetchPreviewStatus,
   fetchSession,
   fetchStats,
   imageUrl,
   saveSession,
-  setConfigPath,
+  startPreviewWarmup,
   undoLast,
   type Bucket,
   type ExifMetadata,
   type Photo,
   type PhotoAction,
+  type PreviewWarmupStatus,
   type SessionStats,
   type Stats,
   type ToastTone,
@@ -22,6 +25,7 @@ import {
 import CompareMode from './CompareMode'
 import { formatDirSize } from './format'
 import LibraryView from './LibraryView'
+import ThumbWarmupScreen from './ThumbWarmupScreen'
 import ZoomableImage from './ZoomableImage'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useKeyboard } from './hooks/useKeyboard'
@@ -30,6 +34,9 @@ import './App.css'
 type AnimDirection = 'left' | 'right' | 'down' | 'up' | null
 type AppStatus = 'loading' | 'ready' | 'error' | 'empty' | 'done'
 type TopMode = 'cull' | 'library'
+
+/** Survives Cull remounts / mode switches once view previews are warm. */
+let cullViewsWarmed = false
 
 const emptyStats: Stats = {
   total: 0,
@@ -92,15 +99,18 @@ export default function App() {
   const [libraryMounted, setLibraryMounted] = useState(false)
   const [libraryEpoch, setLibraryEpoch] = useState(0)
   const [needsPath, setNeedsPath] = useState(false)
-  const [pathInput, setPathInput] = useState('')
   const [pathBusy, setPathBusy] = useState(false)
   const [pathError, setPathError] = useState<string | null>(null)
+  const [cullWarmStatus, setCullWarmStatus] = useState<PreviewWarmupStatus | null>(null)
+  const [cullWarmScanning, setCullWarmScanning] = useState(false)
+  const [cullWarmGate, setCullWarmGate] = useState(false)
 
   const busyRef = useRef(false)
   const photosRef = useRef(photos)
   const indexRef = useRef(currentIndex)
   const shownAt = useRef(Date.now())
   const toastTimer = useRef<number | null>(null)
+  const cullWarmGen = useRef(0)
   photosRef.current = photos
   indexRef.current = currentIndex
 
@@ -131,9 +141,69 @@ export default function App() {
     }
   }, [])
 
+  const skipCullWarmup = useCallback(() => {
+    cullWarmGen.current += 1
+    cullViewsWarmed = true
+    setCullWarmGate(false)
+    setCullWarmScanning(false)
+  }, [])
+
+  const warmCullViews = useCallback(async () => {
+    if (cullViewsWarmed) {
+      setCullWarmGate(false)
+      setCullWarmScanning(false)
+      return true
+    }
+    const gen = ++cullWarmGen.current
+    setCullWarmScanning(true)
+    setCullWarmGate(true)
+    setCullWarmStatus(null)
+    try {
+      let status = await startPreviewWarmup('root', 'view')
+      if (gen !== cullWarmGen.current) return false
+      setCullWarmStatus(status)
+      setCullWarmScanning(false)
+      if (!status.running && status.pending <= 0) {
+        cullViewsWarmed = true
+        setCullWarmGate(false)
+        return true
+      }
+      while (gen === cullWarmGen.current) {
+        await new Promise((r) => window.setTimeout(r, 280))
+        status = await fetchPreviewStatus('root', 'view')
+        if (gen !== cullWarmGen.current) return false
+        setCullWarmStatus(status)
+        if (!status.running && status.pending <= 0) {
+          cullViewsWarmed = true
+          setCullWarmGate(false)
+          return true
+        }
+        if (!status.running && status.ready + status.failed >= status.total) {
+          cullViewsWarmed = true
+          setCullWarmGate(false)
+          return true
+        }
+      }
+      return false
+    } catch {
+      if (gen !== cullWarmGen.current) return false
+      setCullWarmScanning(false)
+      setCullWarmGate(false)
+      return true
+    }
+  }, [])
+
   const loadCull = useCallback(async (resumePhoto?: string) => {
-    setStatus('loading')
+    const showWarm = !cullViewsWarmed
     setError(null)
+    if (showWarm) {
+      setStatus('loading')
+      setCullWarmGate(true)
+      setCullWarmScanning(true)
+      setCullWarmStatus(null)
+    } else if (photosRef.current.length === 0) {
+      setStatus('loading')
+    }
     try {
       const data = await fetchPhotos()
       setPhotos(data.photos)
@@ -145,18 +215,28 @@ export default function App() {
       }
       setCurrentIndex(idx)
       if (data.photos.length === 0) {
+        setCullWarmGate(false)
+        setCullWarmScanning(false)
         setStatus(data.stats.total > 0 ? 'done' : 'empty')
       } else {
+        if (showWarm) {
+          // Warm full-size cull previews; skip still proceeds to ready.
+          await warmCullViews()
+        }
+        setCullWarmGate(false)
+        setCullWarmScanning(false)
         setStatus('ready')
         shownAt.current = Date.now()
         if (data.photos[idx]) void persistSession('cull', data.photos[idx].name, 'root')
       }
       await refreshSessionStats()
     } catch (e) {
+      setCullWarmGate(false)
+      setCullWarmScanning(false)
       setStatus('error')
       setError(e instanceof Error ? e.message : 'Could not load photos.')
     }
-  }, [persistSession, refreshSessionStats])
+  }, [persistSession, refreshSessionStats, warmCullViews])
 
   const bootApp = useCallback(async () => {
     let resumePhoto: string | undefined
@@ -207,21 +287,23 @@ export default function App() {
     })()
   }, [bootApp])
 
-  const submitPath = useCallback(async () => {
-    const path = pathInput.trim()
-    if (!path || pathBusy) return
+  const chooseFolder = useCallback(async () => {
+    if (pathBusy) return
     setPathBusy(true)
     setPathError(null)
     try {
-      await setConfigPath(path)
+      const cfg = await chooseConfigFolder()
+      if (cfg.cancelled || !cfg.configured) {
+        return
+      }
       setNeedsPath(false)
       await bootApp()
     } catch (e) {
-      setPathError(e instanceof Error ? e.message : 'Could not use that folder')
+      setPathError(e instanceof Error ? e.message : 'Could not open that folder')
     } finally {
       setPathBusy(false)
     }
-  }, [pathInput, pathBusy, bootApp])
+  }, [pathBusy, bootApp])
 
   const current = photos[currentIndex]
 
@@ -549,8 +631,18 @@ export default function App() {
 
       {topMode === 'cull' && (
         <div className="view-pane" key="cull">
-          <main className="stage">
-            {status === 'loading' && <p className="state">Loading photos…</p>}
+          <main className={`stage${cullWarmGate ? ' stage--warming' : ''}`}>
+            {cullWarmGate && (
+              <ThumbWarmupScreen
+                mode="cull"
+                status={cullWarmStatus}
+                scanning={cullWarmScanning || !cullWarmStatus}
+                onSkip={
+                  cullWarmStatus && cullWarmStatus.pending > 0 ? skipCullWarmup : undefined
+                }
+              />
+            )}
+            {status === 'loading' && !cullWarmGate && <p className="state">Loading photos…</p>}
             {status === 'error' && (
               <div className="state">
                 <p>Could not load photos.</p>
@@ -714,34 +806,19 @@ export default function App() {
                 Choose photo folder
               </h3>
               <p className="muted">
-                Enter the full path to the folder you want to cull. Sorta will create liked/, shortlisted/,
-                posting/, sharing/, disliked/, and posted/ inside it.
+                Pick the folder you want to cull. Sorta will create liked/, shortlisted/, posting/, sharing/,
+                disliked/, and posted/ inside it.
               </p>
-              <label className="export-label" htmlFor="photo-folder-path">
-                Folder path
-              </label>
-              <input
-                id="photo-folder-path"
-                className="export-input"
-                type="text"
-                value={pathInput}
-                disabled={pathBusy}
-                placeholder="~/Pictures/vacation"
-                autoFocus
-                onChange={(e) => setPathInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !pathBusy) void submitPath()
-                }}
-              />
               {pathError ? <p className="path-dialog-error">{pathError}</p> : null}
               <div className="actions">
                 <button
                   type="button"
                   className="btn btn--like"
-                  disabled={pathBusy || !pathInput.trim()}
-                  onClick={() => void submitPath()}
+                  disabled={pathBusy}
+                  autoFocus
+                  onClick={() => void chooseFolder()}
                 >
-                  {pathBusy ? 'Opening…' : 'Open folder'}
+                  {pathBusy ? 'Waiting for folder…' : 'Choose folder…'}
                 </button>
               </div>
             </div>

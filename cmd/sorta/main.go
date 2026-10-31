@@ -30,7 +30,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: sorta [flags] [photo-directory]\n\n")
 		fmt.Fprintf(os.Stderr, "Local-first photo culling. Classifies photos into liked/, shortlisted/, posting/, sharing/, disliked/. Posted finals live in posted/ (Finder-managed).\n\n")
-		fmt.Fprintf(os.Stderr, "If photo-directory is omitted, the UI prompts for a folder path on first open.\n\n")
+		fmt.Fprintf(os.Stderr, "If photo-directory is omitted, the UI opens a folder picker on first open.\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()

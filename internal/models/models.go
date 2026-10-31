@@ -267,10 +267,12 @@ type ExportResponse struct {
 	Errors      []string `json:"errors,omitempty"`
 }
 
-// ConfigResponse is GET /api/config.
+// ConfigResponse is GET /api/config and successful PUT/choose.
 type ConfigResponse struct {
 	Configured bool   `json:"configured"`
 	Root       string `json:"root,omitempty"`
+	// Cancelled is set when POST /api/config/choose was dismissed by the user.
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 // ConfigRequest is PUT /api/config.
@@ -336,6 +338,7 @@ type StarResponse struct {
 // PreviewWarmupStatus is GET /api/preview/status (and POST /api/preview/warmup).
 type PreviewWarmupStatus struct {
 	Bucket  Bucket `json:"bucket"`
+	Size    string `json:"size"` // "thumb" (library) or "view" (cull)
 	Total   int    `json:"total"`
 	Ready   int    `json:"ready"`
 	Pending int    `json:"pending"`
