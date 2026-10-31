@@ -3,9 +3,13 @@ package scanner
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/prtvi/sorta/internal/exifmeta"
 	"github.com/prtvi/sorta/internal/models"
 )
 
@@ -51,6 +55,13 @@ func ScanBucketDir(dir, urlPrefix string) ([]models.Photo, error) {
 	return scanDir(dir, urlPrefix)
 }
 
+type timedPhoto struct {
+	name    string
+	t       time.Time // sort key: EXIF capture time, else file mod time
+	takenAt string    // set only when EXIF/capture metadata is available
+	modTime time.Time
+}
+
 func scanDir(dir, urlPrefix string) ([]models.Photo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -60,7 +71,7 @@ func scanDir(dir, urlPrefix string) ([]models.Photo, error) {
 		return nil, err
 	}
 
-	var names []string
+	items := make([]timedPhoto, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -69,17 +80,68 @@ func scanDir(dir, urlPrefix string) ([]models.Photo, error) {
 		if !IsSupportedImage(name) {
 			continue
 		}
-		names = append(names, name)
+		tp := timedPhoto{name: name}
+		if info, err := entry.Info(); err == nil {
+			tp.modTime = info.ModTime()
+		}
+		items = append(items, tp)
 	}
 
-	sort.Strings(names)
+	workers := runtime.NumCPU()
+	if workers < 2 {
+		workers = 2
+	}
+	if workers > 8 {
+		workers = 8
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i := range items {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			path := filepath.Join(dir, items[i].name)
+			if t, ok := exifmeta.CaptureTime(path); ok {
+				items[i].t = t
+				items[i].takenAt = t.Format("2006-01-02 15:04:05")
+				return
+			}
+			items[i].t = items[i].modTime
+		}(i)
+	}
+	wg.Wait()
 
-	photos := make([]models.Photo, 0, len(names))
-	for _, name := range names {
-		photos = append(photos, models.Photo{
-			Name: name,
-			URL:  urlPrefix + name,
-		})
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		aOK := !a.t.IsZero()
+		bOK := !b.t.IsZero()
+		switch {
+		case aOK && bOK:
+			if !a.t.Equal(b.t) {
+				return a.t.Before(b.t)
+			}
+			return a.name < b.name
+		case aOK && !bOK:
+			return true
+		case !aOK && bOK:
+			return false
+		default:
+			return a.name < b.name
+		}
+	})
+
+	photos := make([]models.Photo, 0, len(items))
+	for _, it := range items {
+		p := models.Photo{
+			Name: it.name,
+			URL:  urlPrefix + it.name,
+		}
+		if it.takenAt != "" {
+			p.TakenAt = it.takenAt
+		}
+		photos = append(photos, p)
 	}
 	return photos, nil
 }
