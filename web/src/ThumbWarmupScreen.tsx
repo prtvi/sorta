@@ -51,7 +51,8 @@ export default function ThumbWarmupScreen({ status, scanning, mode = 'library', 
   const pending = status?.pending ?? 0
   const failed = status?.failed ?? 0
   const pct = total > 0 ? Math.min(100, Math.round((ready / total) * 100)) : scanning ? 0 : 100
-  const title = mode === 'cull' ? 'Brewing your cull deck' : 'Brewing your library'
+  const title =
+    mode === 'cull' ? 'Preparing thumbnails & previews' : 'Brewing your library'
 
   return (
     <div className="thumb-warmup" role="status" aria-live="polite" aria-busy="true">

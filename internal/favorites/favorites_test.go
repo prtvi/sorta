@@ -62,3 +62,16 @@ func TestSetStarred(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+func TestSaveUsesMetaJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := favorites.Save(dir, models.FavoritesState{Names: []string{"A.jpg"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".sorta", "meta.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".sorta", "favorites.json")); !os.IsNotExist(err) {
+		t.Fatal("legacy favorites.json should not be created")
+	}
+}

@@ -56,7 +56,6 @@ kbd {
   overflow: hidden;
 }
 
-.app--fullscreen .footer .counts,
 .app--fullscreen .brand {
   opacity: 0.35;
 }
@@ -399,6 +398,38 @@ kbd {
   font-size: 0.85rem;
 }
 
+.footer-bar .btn--with-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding-right: 0.4rem;
+}
+
+.footer-bar .btn-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.footer-bar .btn-count {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  min-width: 1.35rem;
+  padding: 0.28rem 0.4rem;
+  border-radius: 0.3rem;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.22);
+  color: inherit;
+  opacity: 0.92;
+}
+
+.footer-bar .btn-count--zero {
+  opacity: 0.45;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -465,17 +496,6 @@ kbd {
 .btn--exif-on {
   border-color: #5a5a62;
   background: #1e1e22;
-}
-
-.counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem 0.75rem;
-  justify-content: center;
-  align-items: center;
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--muted);
 }
 
 .toast {
@@ -652,15 +672,6 @@ kbd {
     animation: none !important;
     transition: none !important;
   }
-}
-
-.session-stats {
-  display: flex;
-  gap: 0.65rem;
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--muted);
-  margin-left: 0.5rem;
 }
 
 .btn--small {

@@ -312,14 +312,14 @@ type ExifMetadata struct {
 	HasGPS      bool   `json:"has_gps"`
 }
 
-// SessionState is lightweight resume metadata in .sorta/session.json.
+// SessionState is lightweight resume metadata (stored in .sorta/meta.json).
 type SessionState struct {
 	Mode       string `json:"mode"`
 	LastPhoto  string `json:"lastPhoto"`
 	LastBucket string `json:"lastBucket"`
 }
 
-// FavoritesState is starred (favourited) photo names in .sorta/favorites.json.
+// FavoritesState is starred (favourited) photo names (stored in .sorta/meta.json).
 type FavoritesState struct {
 	Names []string `json:"names"`
 }
@@ -339,7 +339,8 @@ type StarResponse struct {
 // PreviewWarmupStatus is GET /api/preview/status (and POST /api/preview/warmup).
 type PreviewWarmupStatus struct {
 	Bucket  Bucket `json:"bucket"`
-	Size    string `json:"size"` // "thumb" (library) or "view" (cull)
+	Scope   string `json:"scope,omitempty"` // "directory" for full-library warmup
+	Size    string `json:"size"`            // "thumb", "view", or "both"
 	Total   int    `json:"total"`
 	Ready   int    `json:"ready"`
 	Pending int    `json:"pending"`

@@ -115,10 +115,12 @@ root/              unclassified (Cull queue + Library Unclassified)
 liked/
 review/
 disliked/
-.sorta/     session.json + preview cache (not scanned as photos)
+.sorta/
+  meta.json   session + favorites + warmup marks
+  cache/      disposable preview JPEGs
 ```
 
-Previews live under `.sorta/cache/` and are disposable. **Originals are never modified** — only moved between buckets (and optionally copied on Liked export).
+All app metadata lives in `.sorta/meta.json`. Previews live under `.sorta/cache/` and are disposable. **Originals are never modified** — only moved between buckets (and optionally copied on Liked export).
 
 ---
 

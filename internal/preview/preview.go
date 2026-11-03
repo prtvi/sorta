@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,18 +42,28 @@ func JPEGFor(root, srcPath string) (string, error) {
 	return DisplayJPEG(root, srcPath, SizeView)
 }
 
-// cacheDest returns the on-disk path for a resized preview of srcPath.
-func cacheDest(root, srcPath string, size Size) (dest, key string, err error) {
+// cachePath returns the on-disk path for a resized preview without creating directories.
+// Safe for existence checks during warmup inspection.
+func cachePath(root, srcPath string, size Size) (dest, key string, err error) {
 	_, suffix := sizeParams(size)
-	cacheDir := filepath.Join(root, ".sorta", "cache")
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return "", "", fmt.Errorf("create cache: %w", err)
-	}
 	key, err = cacheKey(srcPath, suffix)
 	if err != nil {
 		return "", "", err
 	}
-	return filepath.Join(cacheDir, key+".jpg"), key, nil
+	return filepath.Join(root, ".sorta", "cache", key+".jpg"), key, nil
+}
+
+// cacheDest returns the on-disk path for a resized preview of srcPath and ensures
+// the cache directory exists (for writers).
+func cacheDest(root, srcPath string, size Size) (dest, key string, err error) {
+	dest, key, err = cachePath(root, srcPath, size)
+	if err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", "", fmt.Errorf("create cache: %w", err)
+	}
+	return dest, key, nil
 }
 
 // freshCache reports whether dest is a non-empty cached preview not older than src.
@@ -72,7 +81,7 @@ func freshCache(srcPath, dest string) bool {
 
 // HasCachedJPEG reports whether a valid resized JPEG already exists for srcPath.
 func HasCachedJPEG(root, srcPath string, size Size) bool {
-	dest, _, err := cacheDest(root, srcPath, size)
+	dest, _, err := cachePath(root, srcPath, size)
 	if err != nil {
 		return false
 	}
@@ -121,10 +130,60 @@ func cacheKey(srcPath, suffix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Basename + size + mtime so previews survive classification moves
+	// (root → liked) without regenerating from the original again.
 	h := sha256.New()
-	_, _ = io.WriteString(h, srcPath)
-	_, _ = fmt.Fprintf(h, "|%d|%d|%s", info.Size(), info.ModTime().UnixNano(), suffix)
+	_, _ = fmt.Fprintf(h, "%s|%d|%d|%s", filepath.Base(srcPath), info.Size(), info.ModTime().UnixNano(), suffix)
 	return hex.EncodeToString(h.Sum(nil))[:32] + "-" + suffix, nil
+}
+
+// WarmWorkers returns how many parallel convert jobs to run.
+// sips/ImageMagick are process-heavy; oversubscribe a little for I/O wait.
+func WarmWorkers() int {
+	n := runtime.NumCPU()
+	if n < 1 {
+		n = 1
+	}
+	w := n * 2
+	if w < 4 {
+		w = 4
+	}
+	if w > 16 {
+		w = 16
+	}
+	return w
+}
+
+// EnsureBoth builds the view preview from the original, then the thumb from
+// that view JPEG so large HEIC/JPEG originals are decoded only once.
+func EnsureBoth(root, srcPath string) (thumbPath, viewPath string, err error) {
+	viewPath, err = DisplayJPEG(root, srcPath, SizeView)
+	if err != nil {
+		return "", "", err
+	}
+
+	thumbPath, thumbKey, err := cacheDest(root, srcPath, SizeThumb)
+	if err != nil {
+		return "", viewPath, err
+	}
+	lock := lockFor(thumbKey)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if freshCache(srcPath, thumbPath) {
+		return thumbPath, viewPath, nil
+	}
+	// Resize from the already-decoded view JPEG — much cheaper than the original.
+	if err := convertResizedJPEG(viewPath, thumbPath, thumbMaxEdge); err != nil {
+		_ = os.Remove(thumbPath)
+		return "", viewPath, err
+	}
+	return thumbPath, viewPath, nil
+}
+
+// NeedsBoth reports whether thumb and/or view caches are missing for srcPath.
+func NeedsBoth(root, srcPath string) bool {
+	return !HasCachedJPEG(root, srcPath, SizeThumb) || !HasCachedJPEG(root, srcPath, SizeView)
 }
 
 func convertResizedJPEG(src, dest string, maxEdge int) error {

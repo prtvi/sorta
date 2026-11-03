@@ -374,8 +374,11 @@ func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveImage(w http.ResponseWriter, r *http.Request, path, filename string) {
 	size := preview.ParseSize(r.URL.Query().Get("size"))
+	// Each image request regenerates a missing/stale preview — this is how
+	// failed warmup converts heal when Library tiles or the viewer load.
 	jpegPath, err := preview.DisplayJPEG(s.Store.Root, path, size)
 	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
 		writeError(w, http.StatusInternalServerError, "PREVIEW_FAILED", "Could not generate image preview")
 		return
 	}
@@ -469,7 +472,6 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.pushUndo(*rec)
-	s.recordSessionMove(req.Action.ToBucket(), decisionMsFrom(r))
 	s.invalidateLibraryCache()
 
 	stats, err := s.Store.CollectStats()
@@ -575,7 +577,6 @@ func (s *Server) handleBurstKeep(w http.ResponseWriter, r *http.Request) {
 		}
 		records = append(records, *rec)
 		moved = append(moved, name)
-		s.recordSessionMove(to, 0)
 	}
 
 	s.pushUndo(records...)
@@ -634,7 +635,6 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.pushUndo(*rec)
-	s.recordSessionMove(req.To, decisionMsFrom(r))
 	s.invalidateLibraryCache()
 
 	stats, err := s.Store.CollectStats()
@@ -720,7 +720,6 @@ func (s *Server) handleMoveBulk(w http.ResponseWriter, r *http.Request) {
 		res.Success = true
 		moved++
 		records = append(records, *rec)
-		s.recordSessionMove(req.To, 0)
 		results = append(results, res)
 	}
 

@@ -10,7 +10,6 @@ import {
   fetchExif,
   fetchFavorites,
   fetchLibrary,
-  fetchPreviewStatus,
   fetchStats,
   imageUrl,
   movePhoto,
@@ -26,7 +25,6 @@ import {
   type ExifMetadata,
   type LibraryResponse,
   type Photo,
-  type PreviewWarmupStatus,
   type SessionStats,
   type Stats,
   type ToastTone,
@@ -35,13 +33,16 @@ import {
 import { formatDirSize } from './format'
 import { useKeyboard } from './hooks/useKeyboard'
 import { packJustifiedRows } from './justifiedLayout'
-import ThumbWarmupScreen from './ThumbWarmupScreen'
+import PreviewImg from './PreviewImg'
+import { areDirectoryPreviewsReady } from './previewWarm'
 import ZoomableImage from './ZoomableImage'
 
 type Props = {
   active?: boolean
   /** Bumps when Cull moves files so a kept-alive Library can refresh. */
   libraryEpoch?: number
+  /** Bumps when parent explicitly opens a bucket (e.g. from Cull done screen). */
+  jumpToken?: number
   initialBucket?: Bucket
   initialPhoto?: string
   onOpenCompare: (photos: Photo[], bucket: Bucket) => void
@@ -93,7 +94,6 @@ const JUSTIFIED_GAP = 0.5
 const JUSTIFIED_ROW_HEIGHT = 190
 
 /** Survives LibraryView remounts when toggling Cull ↔ Library. */
-const thumbsWarmedBuckets = new Set<Bucket>()
 const libraryDataCache = new Map<Bucket, LibraryResponse>()
 
 type SearchHit = { photo: Photo; bucket: Bucket }
@@ -105,6 +105,7 @@ function matchPhotoName(name: string, query: string): boolean {
 export default function LibraryView({
   active = true,
   libraryEpoch = 0,
+  jumpToken = 0,
   initialBucket = 'root',
   initialPhoto,
   onOpenCompare,
@@ -120,6 +121,7 @@ export default function LibraryView({
   const [photos, setPhotos] = useState<Photo[]>([])
   const [bursts, setBursts] = useState<BurstGroup[]>([])
   const [singles, setSingles] = useState<Photo[]>([])
+  const [listLoading, setListLoading] = useState(true)
   const [counts, setCounts] = useState({
     root: 0,
     liked: 0,
@@ -168,11 +170,6 @@ export default function LibraryView({
   const justifiedRef = useRef<HTMLDivElement | null>(null)
   const [aspectRatios, setAspectRatios] = useState<Map<string, number>>(() => new Map())
   const [containerWidth, setContainerWidth] = useState(0)
-  const [thumbStatus, setThumbStatus] = useState<PreviewWarmupStatus | null>(null)
-  const [thumbsReady, setThumbsReady] = useState(true)
-  const [thumbScanning, setThumbScanning] = useState(false)
-  const [thumbGateVisible, setThumbGateVisible] = useState(false)
-  const thumbWarmGen = useRef(0)
 
   const applyCountsFromStats = useCallback(
     (fs: Stats) => {
@@ -218,12 +215,10 @@ export default function LibraryView({
   const invalidateCache = useCallback((...buckets: Bucket[]) => {
     if (buckets.length === 0) {
       cacheRef.current.clear()
-      thumbsWarmedBuckets.clear()
       return
     }
     for (const b of buckets) {
       cacheRef.current.delete(b)
-      thumbsWarmedBuckets.delete(b)
     }
   }, [])
 
@@ -250,77 +245,32 @@ export default function LibraryView({
     }, 300)
   }, [])
 
-  const warmThumbs = useCallback(async (b: Bucket) => {
-    if (thumbsWarmedBuckets.has(b)) {
-      setThumbScanning(false)
-      setThumbGateVisible(false)
-      setThumbsReady(true)
-      return
-    }
-    const gen = ++thumbWarmGen.current
-    setThumbScanning(true)
-    setThumbsReady(false)
-    setThumbGateVisible(false)
-    setThumbStatus(null)
-    try {
-      let status = await startPreviewWarmup(b, 'thumb')
-      if (gen !== thumbWarmGen.current) return
-      setThumbStatus(status)
-      setThumbScanning(false)
-      if (!status.running && status.pending <= 0) {
-        thumbsWarmedBuckets.add(b)
-        setThumbGateVisible(false)
-        setThumbsReady(true)
-        return
-      }
-      // Only show the gate once we know there is real pending work.
-      setThumbGateVisible(true)
-      while (gen === thumbWarmGen.current) {
-        await new Promise((r) => window.setTimeout(r, 280))
-        status = await fetchPreviewStatus(b, 'thumb')
-        if (gen !== thumbWarmGen.current) return
-        setThumbStatus(status)
-        if (!status.running && status.pending <= 0) {
-          thumbsWarmedBuckets.add(b)
-          setThumbsReady(true)
-          setThumbGateVisible(false)
-          return
-        }
-        if (!status.running && status.ready + status.failed >= status.total) {
-          thumbsWarmedBuckets.add(b)
-          setThumbsReady(true)
-          setThumbGateVisible(false)
-          return
-        }
-      }
-    } catch {
-      if (gen !== thumbWarmGen.current) return
-      setThumbScanning(false)
-      setThumbGateVisible(false)
-      setThumbsReady(true)
-    }
-  }, [])
-
-  const skipThumbWarmup = useCallback(() => {
-    thumbWarmGen.current += 1
-    setThumbScanning(false)
-    setThumbGateVisible(false)
-    setThumbsReady(true)
-  }, [])
-
   const loadBucket = useCallback(
     async (b: Bucket, focusName?: string, opts?: { force?: boolean }) => {
       const gen = ++loadGen.current
       setBucket(b)
-      void warmThumbs(b)
 
-      if (!opts?.force) {
-        const cached = cacheRef.current.get(b)
-        if (cached) {
-          applyLibraryData(b, cached, focusName)
-        }
-      } else {
+      const cached = !opts?.force ? cacheRef.current.get(b) : undefined
+      if (opts?.force) {
         cacheRef.current.delete(b)
+      }
+
+      if (cached) {
+        applyLibraryData(b, cached, focusName)
+        setListLoading(false)
+      } else if (!opts?.force) {
+        // Switching tabs without cache — clear stale grid so we never show the
+        // previous bucket's photos (or a false "No photos") under the new label.
+        setPhotos([])
+        setBursts([])
+        setSingles([])
+        setDirSizeBytes(null)
+        setSelected(new Set())
+        setFocused(0)
+        setViewer(null)
+        setListLoading(true)
+      } else {
+        setListLoading(true)
       }
 
       try {
@@ -328,6 +278,7 @@ export default function LibraryView({
         if (gen !== loadGen.current) return
         cacheRef.current.set(b, data)
         applyLibraryData(b, data, focusName)
+        setListLoading(false)
         if (data.stats) {
           void fetchStats()
             .then((s) => onStats(s.filesystem, s.session))
@@ -336,12 +287,18 @@ export default function LibraryView({
           void refreshCounts()
         }
         prefetchOthers(b)
+        // Quietly retry missing/failed previews for this bucket (no gate).
+        // Posted is excluded from boot warmup; tiles also retry via PreviewImg.
+        if (data.photos.length > 0 && (!areDirectoryPreviewsReady() || b === 'posted')) {
+          void startPreviewWarmup(b, 'both').catch(() => {})
+        }
       } catch (e) {
         if (gen !== loadGen.current) return
+        setListLoading(false)
         onToast(e instanceof Error ? e.message : 'Could not load library', 'error')
       }
     },
-    [applyLibraryData, onToast, onStats, prefetchOthers, refreshCounts, warmThumbs],
+    [applyLibraryData, onToast, onStats, prefetchOthers, refreshCounts],
   )
 
   useEffect(() => {
@@ -349,10 +306,7 @@ export default function LibraryView({
     const cached = libraryDataCache.get(bucket)
     if (cached) {
       applyLibraryData(bucket, cached, initialPhoto)
-      if (thumbsWarmedBuckets.has(bucket)) {
-        setThumbsReady(true)
-        setThumbGateVisible(false)
-      }
+      setListLoading(false)
     }
     void loadBucket(bucket, initialPhoto).catch((e) =>
       onToast(e instanceof Error ? e.message : 'Could not load library', 'error'),
@@ -369,11 +323,19 @@ export default function LibraryView({
     if (seenEpoch.current === libraryEpoch) return
     seenEpoch.current = libraryEpoch
     if (libraryEpoch === 0) return
-    // Cull/undo changed files — refresh list, but keep thumb warmup skip (new
-    // frames load on demand; avoids another full-folder gate).
+    // Cull/undo changed files — refresh list. Previews survive moves (basename cache keys).
     libraryDataCache.clear()
     void loadBucket(bucket, undefined, { force: true })
   }, [active, libraryEpoch, bucket, loadBucket])
+
+  const seenJump = useRef(jumpToken)
+  useEffect(() => {
+    if (!active) return
+    if (jumpToken === 0 || seenJump.current === jumpToken) return
+    seenJump.current = jumpToken
+    if (!LIBRARY_BUCKETS.includes(initialBucket)) return
+    void loadBucket(initialBucket, initialPhoto || undefined)
+  }, [active, jumpToken, initialBucket, initialPhoto, loadBucket])
 
   const toggleStar = useCallback(
     async (name: string) => {
@@ -1242,21 +1204,9 @@ export default function LibraryView({
   const viewerCanNext = viewerBurst
     ? viewerBurstIndex >= 0 && viewerBurstIndex < viewerBurst.photos.length - 1
     : focused < visiblePhotos.length - 1
-  const showThumbWarmup = !thumbsReady && thumbGateVisible
-
   return (
     <div className={`library${fullscreen ? ' library--fs' : ''}`}>
-      <section className={`library-main${showThumbWarmup ? ' library-main--warming' : ''}`}>
-        {showThumbWarmup && (
-          <ThumbWarmupScreen
-            mode="library"
-            status={thumbStatus}
-            scanning={thumbScanning || !thumbStatus}
-            onSkip={
-              thumbStatus && thumbStatus.pending > 0 ? skipThumbWarmup : undefined
-            }
-          />
-        )}
+      <section className="library-main">
         <div className="category-cards">
           {LIBRARY_BUCKETS.map((b) => (
             <button
@@ -1288,7 +1238,13 @@ export default function LibraryView({
             <span className="muted">
               {bucketLabel(bucket)}
               {bucket === 'posted' ? ' · Finder-managed' : ''} ·{' '}
-              {starredOnly ? `${visiblePhotos.length} of ${photos.length}` : photos.length}
+              {listLoading && photos.length === 0
+                ? counts[bucket] > 0
+                  ? `${counts[bucket].toLocaleString()}…`
+                  : '…'
+                : starredOnly
+                  ? `${visiblePhotos.length} of ${photos.length}`
+                  : photos.length}
               {dirSizeBytes !== null ? ` · ${formatDirSize(dirSizeBytes)}` : ''}
               {visibleBursts.length > 0
                 ? ` · ${visibleBursts.length} burst${visibleBursts.length === 1 ? '' : 's'}`
@@ -1606,12 +1562,7 @@ export default function LibraryView({
                       onClick={() => void openSearchHit(hit)}
                     >
                       <div className="library-search-hit-media">
-                        <img
-                          src={imageUrl(hit.photo.url, 'thumb')}
-                          alt={hit.photo.name}
-                          loading="lazy"
-                          draggable={false}
-                        />
+                        <PreviewImg src={imageUrl(hit.photo.url, 'thumb')} alt={hit.photo.name} />
                       </div>
                       <span className="library-search-hit-name" title={hit.photo.name}>
                         {hit.photo.name}
@@ -1642,6 +1593,15 @@ export default function LibraryView({
                 <p className="muted">No photo matches “{searchTrimmed}” in any category.</p>
               </div>
             ) : null}
+          </div>
+        ) : photos.length === 0 && listLoading ? (
+          <div className="state">
+            <p>Loading photos…</p>
+            <p className="muted">
+              {counts[bucket] > 0
+                ? `${counts[bucket].toLocaleString()} in ${bucketLabel(bucket)}`
+                : `Opening ${bucketLabel(bucket)}`}
+            </p>
           </div>
         ) : photos.length === 0 ? (
           <div className="state">
@@ -1707,7 +1667,7 @@ export default function LibraryView({
                                   onChange={() => toggleSelect(p.name)}
                                 />
                               </label>
-                              <img src={imageUrl(p.url, 'thumb')} alt={p.name} loading="lazy" draggable={false} />
+                              <PreviewImg src={imageUrl(p.url, 'thumb')} alt={p.name} />
                               {starred.has(p.name) && (
                                 <span className="photo-star-badge" title="Starred" aria-label="Starred">
                                   ★
@@ -1772,11 +1732,9 @@ export default function LibraryView({
                                   onChange={() => toggleSelect(p.name)}
                                 />
                               </label>
-                              <img
+                              <PreviewImg
                                 src={imageUrl(p.url, 'thumb')}
                                 alt={p.name}
-                                loading="lazy"
-                                draggable={false}
                                 onLoad={(e) => noteThumbAspect(p.name, e.currentTarget)}
                               />
                               {starred.has(p.name) && (

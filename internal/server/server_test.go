@@ -206,6 +206,67 @@ func TestPreviewWarmup(t *testing.T) {
 	}
 }
 
+func TestDirectoryPreviewWarmup(t *testing.T) {
+	srv, _ := setup(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/preview/warmup?scope=directory", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("warmup status %d %s", rr.Code, rr.Body.String())
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	var last models.PreviewWarmupStatus
+	for time.Now().Before(deadline) {
+		req = httptest.NewRequest(http.MethodGet, "/api/preview/status?scope=directory", nil)
+		rr = httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("poll status %d", rr.Code)
+		}
+		last = models.PreviewWarmupStatus{}
+		if err := json.NewDecoder(rr.Body).Decode(&last); err != nil {
+			t.Fatal(err)
+		}
+		if !last.Running && last.Pending == 0 && last.Ready+last.Failed >= last.Total {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if last.Scope != "directory" || last.Pending != 0 || last.Ready < 1 {
+		t.Fatalf("directory warmup did not finish: %+v", last)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/preview/warmup?scope=directory", nil)
+	rr = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	var again models.PreviewWarmupStatus
+	if err := json.NewDecoder(rr.Body).Decode(&again); err != nil {
+		t.Fatal(err)
+	}
+	if again.Running || again.Pending != 0 {
+		t.Fatalf("second directory warmup should be a no-op: %+v", again)
+	}
+}
+
+func TestPreviewWarmupCancel(t *testing.T) {
+	srv, _ := setup(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/preview/warmup?cancel=1", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("cancel status %d %s", rr.Code, rr.Body.String())
+	}
+	var st models.PreviewWarmupStatus
+	if err := json.NewDecoder(rr.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Running {
+		t.Fatalf("cancel should stop running: %+v", st)
+	}
+}
+
 func TestServePhotoPathTraversal(t *testing.T) {
 	srv, _ := setup(t)
 	req := httptest.NewRequest(http.MethodGet, "/photos/..%2F..%2Fetc%2Fpasswd", nil)
@@ -490,7 +551,7 @@ func TestFavoritesStar(t *testing.T) {
 	if len(fav.Names) != 1 || fav.Names[0] != "A.jpg" {
 		t.Fatalf("%+v", fav)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".sorta", "favorites.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, ".sorta", "meta.json")); err != nil {
 		t.Fatal(err)
 	}
 

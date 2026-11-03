@@ -1,85 +1,74 @@
 package favorites
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
+	"errors"
 	"sort"
 
+	"github.com/prtvi/sorta/internal/meta"
 	"github.com/prtvi/sorta/internal/models"
 )
 
-const dirName = ".sorta"
-const fileName = "favorites.json"
-
-// Path returns the favorites.json path under root.
+// Path returns the unified meta.json path (favorites live inside it).
 func Path(root string) string {
-	return filepath.Join(root, dirName, fileName)
+	return meta.Path(root)
 }
 
-// Load reads starred filenames. Missing or corrupt files return empty state.
+// Load reads starred filenames from .sorta/meta.json.
 func Load(root string) (models.FavoritesState, error) {
-	data, err := os.ReadFile(Path(root))
+	f, err := meta.Read(root)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, meta.ErrCorrupt) {
 			return models.FavoritesState{Names: []string{}}, nil
 		}
-		return models.FavoritesState{Names: []string{}}, nil
+		return models.FavoritesState{Names: []string{}}, err
 	}
-	var st models.FavoritesState
-	if err := json.Unmarshal(data, &st); err != nil {
-		return models.FavoritesState{Names: []string{}}, nil
-	}
+	st := f.Favorites
 	if st.Names == nil {
 		st.Names = []string{}
 	}
 	return st, nil
 }
 
-// Save writes starred filenames. Creates .sorta if needed.
+// Save writes starred filenames into .sorta/meta.json.
 func Save(root string, st models.FavoritesState) error {
-	dir := filepath.Join(root, dirName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	if st.Names == nil {
 		st.Names = []string{}
 	}
 	sort.Strings(st.Names)
-	data, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := Path(root) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, Path(root))
+	return meta.Update(root, func(f *meta.File) error {
+		f.Favorites = st
+		return nil
+	})
 }
 
 // SetStarred adds or removes a filename from favorites.
 func SetStarred(root, filename string, starred bool) (models.FavoritesState, error) {
-	st, _ := Load(root)
-	set := make(map[string]struct{}, len(st.Names))
-	for _, n := range st.Names {
-		if n != "" {
-			set[n] = struct{}{}
+	var out models.FavoritesState
+	err := meta.Update(root, func(f *meta.File) error {
+		set := make(map[string]struct{}, len(f.Favorites.Names))
+		for _, n := range f.Favorites.Names {
+			if n != "" {
+				set[n] = struct{}{}
+			}
 		}
+		if starred {
+			set[filename] = struct{}{}
+		} else {
+			delete(set, filename)
+		}
+		names := make([]string, 0, len(set))
+		for n := range set {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		f.Favorites.Names = names
+		out = f.Favorites
+		return nil
+	})
+	if out.Names == nil {
+		out.Names = []string{}
 	}
-	if starred {
-		set[filename] = struct{}{}
-	} else {
-		delete(set, filename)
-	}
-	names := make([]string, 0, len(set))
-	for n := range set {
-		names = append(names, n)
-	}
-	st.Names = names
-	if err := Save(root, st); err != nil {
-		return st, err
-	}
-	return st, nil
+	return out, err
 }
 
 // IsStarred reports whether filename is in favorites.

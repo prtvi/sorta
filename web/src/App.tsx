@@ -1,33 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  cancelPreviewWarmup,
   classifyPhoto,
   chooseConfigFolder,
   fetchConfig,
+  fetchDirectoryPreviewStatus,
   fetchExif,
   fetchFavorites,
   fetchPhotos,
-  fetchPreviewStatus,
   fetchSession,
   fetchStats,
   imageUrl,
   revealPhoto,
   saveSession,
   setPhotoStarred,
-  startPreviewWarmup,
+  startDirectoryPreviewWarmup,
   undoLast,
   type Bucket,
   type ExifMetadata,
   type Photo,
   type PhotoAction,
   type PreviewWarmupStatus,
-  type SessionStats,
   type Stats,
   type ToastTone,
 } from './api'
 import CompareMode from './CompareMode'
 import { formatDirSize } from './format'
 import LibraryView from './LibraryView'
+import {
+  areDirectoryPreviewsReady,
+  markDirectoryPreviewsReady,
+  resetDirectoryPreviewsReady,
+} from './previewWarm'
 import ThumbWarmupScreen from './ThumbWarmupScreen'
 import ZoomableImage from './ZoomableImage'
 import { useFullscreen } from './hooks/useFullscreen'
@@ -37,9 +42,6 @@ import './App.css'
 type AnimDirection = 'left' | 'right' | 'down' | 'up' | null
 type AppStatus = 'loading' | 'ready' | 'error' | 'empty' | 'done'
 type TopMode = 'cull' | 'library'
-
-/** Survives Cull remounts / mode switches once view previews are warm. */
-let cullViewsWarmed = false
 
 const emptyStats: Stats = {
   total: 0,
@@ -52,15 +54,6 @@ const emptyStats: Stats = {
   posted: 0,
   sharing: 0,
   root_dir_size_bytes: 0,
-}
-
-const emptySession: SessionStats = {
-  reviewed: 0,
-  liked: 0,
-  shortlisted: 0,
-  disliked: 0,
-  sharing: 0,
-  avg_decision_seconds: 0,
 }
 
 function preloadImage(url: string) {
@@ -86,7 +79,6 @@ export default function App() {
   const [photos, setPhotos] = useState<Photo[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [stats, setStats] = useState<Stats>(emptyStats)
-  const [sessionStats, setSessionStats] = useState<SessionStats>(emptySession)
   const [status, setStatus] = useState<AppStatus>('loading')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -101,21 +93,22 @@ export default function App() {
   const [compareBucket, setCompareBucket] = useState<Bucket>('liked')
   const [libBucket, setLibBucket] = useState<Bucket>('liked')
   const [libPhoto, setLibPhoto] = useState<string | undefined>()
+  /** Bumps when Cull explicitly opens a library bucket so a kept-alive Library jumps. */
+  const [libraryJumpToken, setLibraryJumpToken] = useState(0)
   const [libraryMounted, setLibraryMounted] = useState(false)
   const [libraryEpoch, setLibraryEpoch] = useState(0)
   const [needsPath, setNeedsPath] = useState(false)
   const [pathBusy, setPathBusy] = useState(false)
   const [pathError, setPathError] = useState<string | null>(null)
-  const [cullWarmStatus, setCullWarmStatus] = useState<PreviewWarmupStatus | null>(null)
-  const [cullWarmScanning, setCullWarmScanning] = useState(false)
-  const [cullWarmGate, setCullWarmGate] = useState(false)
+  const [dirWarmStatus, setDirWarmStatus] = useState<PreviewWarmupStatus | null>(null)
+  const [dirWarmScanning, setDirWarmScanning] = useState(false)
+  const [dirWarmGate, setDirWarmGate] = useState(false)
 
   const busyRef = useRef(false)
   const photosRef = useRef(photos)
   const indexRef = useRef(currentIndex)
-  const shownAt = useRef(Date.now())
   const toastTimer = useRef<number | null>(null)
-  const cullWarmGen = useRef(0)
+  const dirWarmGen = useRef(0)
   photosRef.current = photos
   indexRef.current = currentIndex
 
@@ -136,77 +129,80 @@ export default function App() {
     }
   }, [])
 
-  const refreshSessionStats = useCallback(async () => {
+  const refreshStats = useCallback(async () => {
     try {
       const s = await fetchStats()
       setStats(s.filesystem)
-      setSessionStats(s.session)
     } catch {
       /* ignore */
     }
   }, [])
 
-  const skipCullWarmup = useCallback(() => {
-    cullWarmGen.current += 1
-    cullViewsWarmed = true
-    setCullWarmGate(false)
-    setCullWarmScanning(false)
+  const skipDirectoryWarmup = useCallback(() => {
+    // Cancel server work and let boot continue — do NOT mark the directory
+    // durably ready; next reload will resume remaining converts.
+    dirWarmGen.current += 1
+    setDirWarmGate(false)
+    setDirWarmScanning(false)
+    void cancelPreviewWarmup().catch(() => {})
   }, [])
 
-  const warmCullViews = useCallback(async () => {
-    if (cullViewsWarmed) {
-      setCullWarmGate(false)
-      setCullWarmScanning(false)
+  /** First-load only: generate thumb + view for every photo in the directory. */
+  const ensureDirectoryPreviews = useCallback(async () => {
+    if (areDirectoryPreviewsReady()) {
+      setDirWarmGate(false)
+      setDirWarmScanning(false)
       return true
     }
-    const gen = ++cullWarmGen.current
-    setCullWarmScanning(true)
-    setCullWarmGate(true)
-    setCullWarmStatus(null)
+    const gen = ++dirWarmGen.current
+    setDirWarmScanning(true)
+    setDirWarmGate(false)
+    setDirWarmStatus(null)
     try {
-      let status = await startPreviewWarmup('root', 'view')
-      if (gen !== cullWarmGen.current) return false
-      setCullWarmStatus(status)
-      setCullWarmScanning(false)
-      if (!status.running && status.pending <= 0) {
-        cullViewsWarmed = true
-        setCullWarmGate(false)
+      let status = await startDirectoryPreviewWarmup()
+      if (gen !== dirWarmGen.current) return true // skipped — proceed without durable ready
+      setDirWarmStatus(status)
+      setDirWarmScanning(false)
+      if (!status.running && status.pending <= 0 && status.failed <= 0) {
+        markDirectoryPreviewsReady()
+        setDirWarmGate(false)
         return true
       }
-      while (gen === cullWarmGen.current) {
-        await new Promise((r) => window.setTimeout(r, 280))
-        status = await fetchPreviewStatus('root', 'view')
-        if (gen !== cullWarmGen.current) return false
-        setCullWarmStatus(status)
-        if (!status.running && status.pending <= 0) {
-          cullViewsWarmed = true
-          setCullWarmGate(false)
+      if (!status.running && status.pending <= 0 && status.failed > 0) {
+        // Partial failure: browse now; next boot retries failed files.
+        setDirWarmGate(false)
+        return true
+      }
+      setDirWarmGate(true)
+      while (gen === dirWarmGen.current) {
+        await new Promise((r) => window.setTimeout(r, 250))
+        status = await fetchDirectoryPreviewStatus()
+        if (gen !== dirWarmGen.current) return true // skipped
+        setDirWarmStatus(status)
+        if (!status.running && status.pending <= 0 && status.failed <= 0) {
+          markDirectoryPreviewsReady()
+          setDirWarmGate(false)
           return true
         }
-        if (!status.running && status.ready + status.failed >= status.total) {
-          cullViewsWarmed = true
-          setCullWarmGate(false)
+        if (!status.running && status.pending <= 0) {
+          // Finished with failures — allow browse; do not mark durable ready.
+          setDirWarmGate(false)
           return true
         }
       }
-      return false
+      return true
     } catch {
-      if (gen !== cullWarmGen.current) return false
-      setCullWarmScanning(false)
-      setCullWarmGate(false)
+      if (gen !== dirWarmGen.current) return true
+      setDirWarmScanning(false)
+      setDirWarmGate(false)
+      // Allow browsing; do not mark ready so reload retries.
       return true
     }
   }, [])
 
   const loadCull = useCallback(async (resumePhoto?: string) => {
-    const showWarm = !cullViewsWarmed
     setError(null)
-    if (showWarm) {
-      setStatus('loading')
-      setCullWarmGate(true)
-      setCullWarmScanning(true)
-      setCullWarmStatus(null)
-    } else if (photosRef.current.length === 0) {
+    if (photosRef.current.length === 0) {
       setStatus('loading')
     }
     try {
@@ -220,31 +216,20 @@ export default function App() {
       }
       setCurrentIndex(idx)
       if (data.photos.length === 0) {
-        setCullWarmGate(false)
-        setCullWarmScanning(false)
         setStatus(data.stats.total > 0 ? 'done' : 'empty')
       } else {
-        if (showWarm) {
-          // Warm full-size cull previews; skip still proceeds to ready.
-          await warmCullViews()
-        }
-        setCullWarmGate(false)
-        setCullWarmScanning(false)
         setStatus('ready')
-        shownAt.current = Date.now()
         if (data.photos[idx]) void persistSession('cull', data.photos[idx].name, 'root')
       }
-      await refreshSessionStats()
+      await refreshStats()
       void fetchFavorites()
         .then((fav) => setStarred(new Set(fav.names ?? [])))
         .catch(() => {})
     } catch (e) {
-      setCullWarmGate(false)
-      setCullWarmScanning(false)
       setStatus('error')
       setError(e instanceof Error ? e.message : 'Could not load photos.')
     }
-  }, [persistSession, refreshSessionStats, warmCullViews])
+  }, [persistSession, refreshStats])
 
   const bootApp = useCallback(async () => {
     let resumePhoto: string | undefined
@@ -272,13 +257,20 @@ export default function App() {
     } catch {
       /* ignore */
     }
+
+    setStatus('loading')
+    await ensureDirectoryPreviews()
+
     setTopMode(resumeMode)
     setLibBucket(resumeMode === 'library' ? resumeBucket : 'root')
     setLibPhoto(resumePhoto)
-    if (resumeMode === 'library') setLibraryMounted(true)
-    if (resumeMode === 'cull') await loadCull(resumePhoto)
-    else setStatus('ready')
-  }, [loadCull])
+    if (resumeMode === 'library') {
+      setLibraryMounted(true)
+      setStatus('ready')
+    } else {
+      await loadCull(resumePhoto)
+    }
+  }, [ensureDirectoryPreviews, loadCull])
 
   useEffect(() => {
     void (async () => {
@@ -304,6 +296,7 @@ export default function App() {
       if (cfg.cancelled || !cfg.configured) {
         return
       }
+      resetDirectoryPreviewsReady()
       setNeedsPath(false)
       await bootApp()
     } catch (e) {
@@ -360,7 +353,6 @@ export default function App() {
       const next = clampIndex(indexRef.current + delta, list.length)
       if (next === indexRef.current) return
       setCurrentIndex(next)
-      shownAt.current = Date.now()
     },
     [topMode, status],
   )
@@ -384,10 +376,9 @@ export default function App() {
               ? 'up'
               : 'down'
       setAnim(direction)
-      const decisionMs = Date.now() - shownAt.current
 
       try {
-        const res = await classifyPhoto(photo.name, action, decisionMs)
+        const res = await classifyPhoto(photo.name, action)
         await new Promise((r) => setTimeout(r, 220))
         setAnim(null)
         setStats(res.stats)
@@ -398,8 +389,6 @@ export default function App() {
           if (next.length === 0) setStatus(res.stats.total > 0 ? 'done' : 'empty')
           return next
         })
-        shownAt.current = Date.now()
-        await refreshSessionStats()
       } catch (e) {
         setAnim(null)
         const msg = e instanceof Error ? e.message : 'Could not move photo.'
@@ -409,7 +398,7 @@ export default function App() {
         setBusy(false)
       }
     },
-    [topMode, showToast, refreshSessionStats],
+    [topMode, showToast],
   )
 
   const toggleStar = useCallback(
@@ -484,22 +473,21 @@ export default function App() {
           })
           setCurrentIndex(idx)
           setStatus('ready')
-          shownAt.current = Date.now()
           restored.forEach((p) => preloadImage(p.url))
         } else {
-          await refreshSessionStats()
+          await refreshStats()
         }
       } else {
         showToast(res.count && res.count > 1 ? `Undid ${res.count}` : 'Undone', 'neutral')
       }
-      await refreshSessionStats()
+      await refreshStats()
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Undo failed', 'error')
     } finally {
       busyRef.current = false
       setBusy(false)
     }
-  }, [topMode, showToast, refreshSessionStats])
+  }, [topMode, showToast, refreshStats])
 
   useKeyboard(
     (e) => {
@@ -577,7 +565,8 @@ export default function App() {
   const switchToLibrary = (bucket?: Bucket) => {
     if (bucket) {
       setLibBucket(bucket)
-      setLibPhoto('')
+      setLibPhoto(undefined)
+      setLibraryJumpToken((n) => n + 1)
     }
     setLibraryMounted(true)
     setTopMode('library')
@@ -613,18 +602,6 @@ export default function App() {
             Library
           </button>
         </nav>
-        {topMode !== 'library' && (
-          <div className="session-stats" title="Session statistics">
-            <span title="Reviewed this session">Rv:{sessionStats.reviewed}</span>
-            <span title="Liked">L:{sessionStats.liked}</span>
-            <span title="Shortlisted">Sl:{sessionStats.shortlisted}</span>
-            <span title="Disliked">D:{sessionStats.disliked}</span>
-            <span title="Sharing">Sh:{sessionStats.sharing}</span>
-            {sessionStats.avg_decision_seconds > 0 && (
-              <span title="Average decision time">~{sessionStats.avg_decision_seconds.toFixed(1)}s</span>
-            )}
-          </div>
-        )}
         <div className="header-right">
           {topMode === 'cull' && (status === 'ready' || status === 'done') && (
             <div className="progress" title="Unclassified (root) folder size · progress">
@@ -649,7 +626,7 @@ export default function App() {
         </div>
       )}
 
-      {libraryMounted && (
+      {libraryMounted && !dirWarmGate && (
         <div
           className="view-pane"
           key="library-browse"
@@ -658,14 +635,14 @@ export default function App() {
           <LibraryView
             active={topMode === 'library' && subMode === 'browse'}
             libraryEpoch={libraryEpoch}
+            jumpToken={libraryJumpToken}
             initialBucket={libBucket}
             initialPhoto={libPhoto}
             fullscreen={fullscreen}
             onToggleFullscreen={toggleFullscreen}
             onToast={showToast}
-            onStats={(fs, sess) => {
+            onStats={(fs) => {
               setStats(fs)
-              setSessionStats(sess)
             }}
             onSession={(b, photo) => {
               setLibBucket(b)
@@ -688,25 +665,28 @@ export default function App() {
             bucket={compareBucket}
             onExit={() => setSubMode('browse')}
             onToast={showToast}
-            onMoved={() => void refreshSessionStats()}
+            onMoved={() => void refreshStats()}
           />
         </div>
       )}
 
-      {topMode === 'cull' && (
+      {dirWarmGate && (
+        <div className="view-pane view-pane--warmup">
+          <main className="stage stage--warming">
+            <ThumbWarmupScreen
+              mode="cull"
+              status={dirWarmStatus}
+              scanning={dirWarmScanning || !dirWarmStatus}
+              onSkip={dirWarmStatus && dirWarmStatus.pending > 0 ? skipDirectoryWarmup : undefined}
+            />
+          </main>
+        </div>
+      )}
+
+      {topMode === 'cull' && !dirWarmGate && (
         <div className="view-pane" key="cull">
-          <main className={`stage${cullWarmGate ? ' stage--warming' : ''}`}>
-            {cullWarmGate && (
-              <ThumbWarmupScreen
-                mode="cull"
-                status={cullWarmStatus}
-                scanning={cullWarmScanning || !cullWarmStatus}
-                onSkip={
-                  cullWarmStatus && cullWarmStatus.pending > 0 ? skipCullWarmup : undefined
-                }
-              />
-            )}
-            {status === 'loading' && !cullWarmGate && <p className="state">Loading photos…</p>}
+          <main className="stage">
+            {status === 'loading' && <p className="state">Loading photos…</p>}
             {status === 'error' && (
               <div className="state">
                 <p>Could not load photos.</p>
@@ -810,25 +790,70 @@ export default function App() {
               <div className="footer-bar">
                 {status === 'ready' && (
                   <div className="actions">
-                    <button type="button" className="btn btn--dislike" disabled={busy} onClick={() => void runAction('disliked')}>
-                      Disliked <kbd>D</kbd>
-                    </button>
-                    <button type="button" className="btn btn--sharing" disabled={busy} onClick={() => void runAction('sharing')}>
-                      Sharing <kbd>S</kbd>
-                    </button>
-                    <button type="button" className="btn btn--like" disabled={busy} onClick={() => void runAction('liked')}>
-                      Liked <kbd>L</kbd>
+                    <button
+                      type="button"
+                      className="btn btn--dislike btn--with-count"
+                      disabled={busy}
+                      onClick={() => void runAction('disliked')}
+                    >
+                      <span className="btn-main">
+                        Disliked <kbd>D</kbd>
+                      </span>
+                      <span className={`btn-count${stats.disliked === 0 ? ' btn-count--zero' : ''}`}>
+                        {stats.disliked}
+                      </span>
                     </button>
                     <button
                       type="button"
-                      className="btn btn--shortlisted"
+                      className="btn btn--sharing btn--with-count"
+                      disabled={busy}
+                      onClick={() => void runAction('sharing')}
+                    >
+                      <span className="btn-main">
+                        Sharing <kbd>S</kbd>
+                      </span>
+                      <span className={`btn-count${stats.sharing === 0 ? ' btn-count--zero' : ''}`}>
+                        {stats.sharing}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--like btn--with-count"
+                      disabled={busy}
+                      onClick={() => void runAction('liked')}
+                    >
+                      <span className="btn-main">
+                        Liked <kbd>L</kbd>
+                      </span>
+                      <span className={`btn-count${stats.liked === 0 ? ' btn-count--zero' : ''}`}>
+                        {stats.liked}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--shortlisted btn--with-count"
                       disabled={busy}
                       onClick={() => void runAction('shortlisted')}
                     >
-                      Shortlisted <kbd>T</kbd>
+                      <span className="btn-main">
+                        Shortlisted <kbd>T</kbd>
+                      </span>
+                      <span className={`btn-count${stats.shortlisted === 0 ? ' btn-count--zero' : ''}`}>
+                        {stats.shortlisted}
+                      </span>
                     </button>
-                    <button type="button" className="btn btn--posting" disabled={busy} onClick={() => void runAction('posting')}>
-                      Posting <kbd>P</kbd>
+                    <button
+                      type="button"
+                      className="btn btn--posting btn--with-count"
+                      disabled={busy}
+                      onClick={() => void runAction('posting')}
+                    >
+                      <span className="btn-main">
+                        Posting <kbd>P</kbd>
+                      </span>
+                      <span className={`btn-count${stats.posting === 0 ? ' btn-count--zero' : ''}`}>
+                        {stats.posting}
+                      </span>
                     </button>
                     <button type="button" className="btn btn--neutral" disabled={busy} onClick={() => void runUndo()}>
                       Undo <kbd>⌫</kbd>
@@ -869,14 +894,6 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                <div className="counts">
-                  <span title="Liked">L:{stats.liked}</span>
-                  <span title="Shortlisted">Sl:{stats.shortlisted}</span>
-                  <span title="Posting">P:{stats.posting}</span>
-                  <span title="Sharing">Sh:{stats.sharing}</span>
-                  <span title="Disliked">D:{stats.disliked}</span>
-                  <span title="Unclassified">U:{stats.remaining}</span>
-                </div>
               </div>
             </footer>
           )}

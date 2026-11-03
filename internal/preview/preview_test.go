@@ -63,6 +63,53 @@ func TestHasCachedJPEG(t *testing.T) {
 	}
 }
 
+func TestEnsureBoth(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("sips only on macOS")
+	}
+	if _, err := exec.LookPath("sips"); err != nil {
+		t.Skip("sips not available")
+	}
+
+	dir := t.TempDir()
+	pngPath := filepath.Join(dir, "src.png")
+	png := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
+		0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xfe, 0xd4, 0xef, 0x00, 0x00,
+		0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	if err := os.WriteFile(pngPath, png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !preview.NeedsBoth(dir, pngPath) {
+		t.Fatal("expected needs both before generate")
+	}
+	thumb, view, err := preview.EnsureBoth(dir, pngPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thumb == "" || view == "" || thumb == view {
+		t.Fatalf("bad paths thumb=%s view=%s", thumb, view)
+	}
+	if preview.NeedsBoth(dir, pngPath) {
+		t.Fatal("expected caches after EnsureBoth")
+	}
+	// Survives "move" to another folder with same basename.
+	moved := filepath.Join(dir, "liked", "src.png")
+	if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(pngPath, moved); err != nil {
+		t.Fatal(err)
+	}
+	if preview.NeedsBoth(dir, moved) {
+		t.Fatal("expected cache to survive basename move")
+	}
+}
+
 func TestDisplayJPEGThumbAndView(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("sips only on macOS")

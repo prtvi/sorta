@@ -30,8 +30,15 @@ export default function ZoomableImage({ src, alt, className, imgClassName, reset
   const [scale, setScale] = useState(1)
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 })
   const [dragging, setDragging] = useState(false)
+  const [displaySrc, setDisplaySrc] = useState(src)
+  const [loadTries, setLoadTries] = useState(0)
   const dragRef = useRef<{ pointerId: number; x: number; y: number; pan: Point } | null>(null)
   const gestureStartScale = useRef(1)
+
+  useEffect(() => {
+    setDisplaySrc(src)
+    setLoadTries(0)
+  }, [src])
 
   const sync = useCallback((nextScale: number, nextPan: Point) => {
     const s = clamp(nextScale, MIN_SCALE, MAX_SCALE)
@@ -171,11 +178,18 @@ export default function ZoomableImage({ src, alt, className, imgClassName, reset
       onDoubleClick={onDoubleClick}
     >
       <img
-        src={src}
+        src={displaySrc}
         alt={alt}
         className={imgClassName}
         draggable={false}
         style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+        onError={() => {
+          if (loadTries >= 2) return
+          const next = loadTries + 1
+          setLoadTries(next)
+          const sep = src.includes('?') ? '&' : '?'
+          setDisplaySrc(`${src}${sep}retry=${Date.now()}-${next}`)
+        }}
       />
       {zoomed && <span className="zoomable-badge">{Math.round(scale * 100)}%</span>}
     </div>

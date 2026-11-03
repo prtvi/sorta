@@ -7,13 +7,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/prtvi/sorta/internal/filesystem"
+	"github.com/prtvi/sorta/internal/meta"
 	"github.com/prtvi/sorta/internal/models"
 )
 
-// Server holds HTTP handlers, undo stack, and in-process session stats.
+// Server holds HTTP handlers and an in-process undo stack.
 type Server struct {
 	Store   *filesystem.Store
 	storeMu sync.RWMutex
@@ -21,17 +21,13 @@ type Server struct {
 	mu   sync.Mutex
 	undo []models.UndoEntry
 
-	sessionMu     sync.Mutex
-	session       models.SessionStats
-	decisionSumMs int64
-	decisionCount int
-
 	libMu    sync.Mutex
 	libCache map[models.Bucket]libCacheEntry
 
-	warmMu   sync.Mutex
-	warm     thumbWarmState
-	warmDone map[string]warmDoneEntry
+	warmMu        sync.Mutex
+	warmPersistMu sync.Mutex // serializes meta.json warmDone writes
+	warm          thumbWarmState
+	warmDone      map[string]meta.WarmDoneEntry
 }
 
 type libCacheEntry struct {
@@ -44,11 +40,13 @@ type libCacheEntry struct {
 
 // New creates a Server bound to the given store.
 func New(store *filesystem.Store) *Server {
-	return &Server{
+	s := &Server{
 		Store:    store,
 		libCache: make(map[models.Bucket]libCacheEntry),
-		warmDone: make(map[string]warmDoneEntry),
+		warmDone: make(map[string]meta.WarmDoneEntry),
 	}
+	s.loadWarmDoneFromDisk()
+	return s
 }
 
 // Handler returns the root mux for the application.
@@ -96,6 +94,7 @@ func (s *Server) SetStore(store *filesystem.Store) bool {
 		return false
 	}
 	s.Store = store
+	s.loadWarmDoneFromDisk()
 	return true
 }
 
@@ -143,38 +142,19 @@ func (s *Server) pushUndo(records ...models.ActionRecord) {
 	s.mu.Unlock()
 }
 
-func (s *Server) recordSessionMove(to models.Bucket, decisionMs int64) {
-	s.sessionMu.Lock()
-	defer s.sessionMu.Unlock()
-	s.session.Reviewed++
-	switch to {
-	case models.BucketLiked:
-		s.session.Liked++
-	case models.BucketShortlisted:
-		s.session.Shortlisted++
-	case models.BucketDisliked:
-		s.session.Disliked++
-	case models.BucketSharing:
-		s.session.Sharing++
-	}
-	if decisionMs > 0 {
-		s.decisionSumMs += decisionMs
-		s.decisionCount++
-		s.session.AvgDecisionSeconds = float64(s.decisionSumMs) / float64(s.decisionCount) / 1000.0
-	}
-}
-
 func (s *Server) sessionSnapshot() models.SessionStats {
-	s.sessionMu.Lock()
-	defer s.sessionMu.Unlock()
-	return s.session
+	// Live per-process session counters removed; field kept for API shape.
+	return models.SessionStats{}
 }
 
 func (s *Server) invalidateLibraryCache() {
 	s.libMu.Lock()
 	s.libCache = make(map[models.Bucket]libCacheEntry)
 	s.libMu.Unlock()
-	s.invalidateWarmDone()
+	// Drop only the directory-wide mark so the next status check re-fingerprints.
+	// On-disk JPEG caches stay valid (keyed by basename); we must not wipe
+	// warm-done and force a full regenerate after every cull move.
+	s.invalidateDirectoryWarmMark()
 }
 
 func libraryFingerprint(photos []models.Photo) string {
@@ -186,23 +166,3 @@ func libraryFingerprint(photos []models.Photo) string {
 	return strings.Join(names, "\n")
 }
 
-// DecisionHeader is an optional client header with decision duration in ms.
-const DecisionHeader = "X-Decision-Ms"
-
-func decisionMsFrom(r *http.Request) int64 {
-	v := r.Header.Get(DecisionHeader)
-	if v == "" {
-		return 0
-	}
-	var ms int64
-	for _, c := range v {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		ms = ms*10 + int64(c-'0')
-	}
-	if ms > int64((time.Hour / time.Millisecond)) {
-		return 0
-	}
-	return ms
-}

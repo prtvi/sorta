@@ -40,4 +40,25 @@ func TestLoadCorrupt(t *testing.T) {
 	if err != nil || got.Mode != "" {
 		t.Fatalf("corrupt should yield empty: %+v %v", got, err)
 	}
+	// Save must not wipe the corrupt file with empty session.
+	if err := session.Save(dir, models.SessionState{Mode: "cull"}); err == nil {
+		t.Fatal("Save should fail when meta is corrupt with no backup")
+	}
+	raw, _ := os.ReadFile(p)
+	if string(raw) != "{not-json" {
+		t.Fatalf("corrupt file must not be overwritten, got %q", raw)
+	}
+}
+
+func TestSaveUsesMetaJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := session.Save(dir, models.SessionState{Mode: "cull"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".sorta", "meta.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".sorta", "session.json")); !os.IsNotExist(err) {
+		t.Fatal("legacy session.json should not be created")
+	}
 }

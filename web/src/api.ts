@@ -2,6 +2,8 @@ export type PhotoAction = 'liked' | 'shortlisted' | 'posting' | 'disliked' | 'sh
 export type Bucket = 'root' | 'liked' | 'shortlisted' | 'posting' | 'sharing' | 'disliked' | 'posted'
 export type AppMode = 'cull' | 'library' | 'compare'
 export type ImageSize = 'view' | 'thumb'
+/** Warmup may request both preview tiers in one pass. */
+export type WarmupSize = ImageSize | 'both'
 export type ToastTone = 'neutral' | 'error' | Bucket
 
 export function toastToneForBucket(bucket: Bucket): ToastTone {
@@ -369,10 +371,11 @@ export async function setPhotoStarred(filename: string, starred: boolean): Promi
   return parseJSON<StarResponse>(res)
 }
 
-export type PreviewSize = ImageSize
+export type PreviewSize = WarmupSize
 
 export interface PreviewWarmupStatus {
   bucket: Bucket
+  scope?: string
   size: PreviewSize | string
   total: number
   ready: number
@@ -381,10 +384,15 @@ export interface PreviewWarmupStatus {
   running: boolean
 }
 
-function previewQuery(bucket?: Bucket, size?: PreviewSize): string {
+function previewQuery(opts?: {
+  bucket?: Bucket
+  size?: PreviewSize
+  scope?: 'directory'
+}): string {
   const params = new URLSearchParams()
-  if (bucket) params.set('bucket', bucket)
-  if (size) params.set('size', size)
+  if (opts?.scope) params.set('scope', opts.scope)
+  if (opts?.bucket) params.set('bucket', opts.bucket)
+  if (opts?.size) params.set('size', opts.size)
   const q = params.toString()
   return q ? `?${q}` : ''
 }
@@ -393,7 +401,7 @@ export async function fetchPreviewStatus(
   bucket?: Bucket,
   size: PreviewSize = 'thumb',
 ): Promise<PreviewWarmupStatus> {
-  const res = await fetch(`/api/preview/status${previewQuery(bucket, size)}`)
+  const res = await fetch(`/api/preview/status${previewQuery({ bucket, size })}`)
   return parseJSON<PreviewWarmupStatus>(res)
 }
 
@@ -401,8 +409,27 @@ export async function startPreviewWarmup(
   bucket: Bucket,
   size: PreviewSize = 'thumb',
 ): Promise<PreviewWarmupStatus> {
-  const res = await fetch(`/api/preview/warmup${previewQuery(bucket, size)}`, {
+  const res = await fetch(`/api/preview/warmup${previewQuery({ bucket, size })}`, {
     method: 'POST',
   })
+  return parseJSON<PreviewWarmupStatus>(res)
+}
+
+/** One-shot warmup for every library bucket (thumb + view). */
+export async function fetchDirectoryPreviewStatus(): Promise<PreviewWarmupStatus> {
+  const res = await fetch(`/api/preview/status${previewQuery({ scope: 'directory' })}`)
+  return parseJSON<PreviewWarmupStatus>(res)
+}
+
+export async function startDirectoryPreviewWarmup(): Promise<PreviewWarmupStatus> {
+  const res = await fetch(`/api/preview/warmup${previewQuery({ scope: 'directory' })}`, {
+    method: 'POST',
+  })
+  return parseJSON<PreviewWarmupStatus>(res)
+}
+
+/** Stop in-flight warmup without writing a durable warm-done mark. */
+export async function cancelPreviewWarmup(): Promise<PreviewWarmupStatus> {
+  const res = await fetch(`/api/preview/warmup?cancel=1`, { method: 'POST' })
   return parseJSON<PreviewWarmupStatus>(res)
 }
